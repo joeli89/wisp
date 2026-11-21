@@ -126,7 +126,7 @@ struct ToolbarView: View {
                                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                                 .monospacedDigit()
                         } else {
-                            MercuryDotMark()
+                            WispDotMark()
                                 .scaleEffect(0.78)
                                 .opacity(0.75)
                         }
@@ -137,7 +137,7 @@ struct ToolbarView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(expanded ? "Collapse Mercury controls" : "Expand Mercury controls")
+                .accessibilityLabel(expanded ? "Collapse Wisp controls" : "Expand Wisp controls")
 
                 VStack(spacing: 0) {
                     HStack(spacing: 10) {
@@ -494,15 +494,12 @@ struct ToolbarView: View {
     }
 }
 
-private struct MercuryDotMark: View {
+private struct WispDotMark: View {
     private let glyphs = [
-        ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
-        ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
-        ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
-        ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
-        ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
-        ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
-        ["10001", "10001", "01010", "00100", "00100", "00100", "00100"]
+        ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
+        ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
+        ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+        ["11110", "10001", "10001", "11110", "10000", "10000", "10000"]
     ]
 
     var body: some View {
@@ -517,8 +514,8 @@ private struct MercuryDotMark: View {
                 }
             }
         }
-        .frame(width: 82, height: 14)
-        .accessibilityLabel("Mercury")
+        .frame(width: CGFloat(glyphs.count * 12 - 2), height: 14)
+        .accessibilityLabel("Wisp")
     }
 }
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mercury compression benchmark.
+# Wisp compression benchmark.
 #
 # Compares the current pipeline (real-time HEVC ~0.025 bpp → x265) against
 # alternatives, scoring every candidate against a near-lossless reference.
@@ -125,7 +125,7 @@ import csv, sys
 rows = list(csv.DictReader(open(sys.argv[1])))
 dur = float(sys.argv[2])
 with open(sys.argv[3], "w") as f:
-    f.write(f"# Mercury compression benchmark\n\nReference: {dur:.0f}s, 1920x1080@60, ProRes HQ. Scores are against the reference (higher is better).\n")
+    f.write(f"# Wisp compression benchmark\n\nReference: {dur:.0f}s, 1920x1080@60, ProRes HQ. Scores are against the reference (higher is better).\n")
     f.write("`live` = happens during recording. `post` = extra wait after stop.\n\n")
     f.write("| Candidate | Stage | Size (MB) | Mbps | MB/hour | Encode (s) | VMAF | SSIM | PSNR |\n|---|---|---|---|---|---|---|---|---|\n")
     for r in rows:

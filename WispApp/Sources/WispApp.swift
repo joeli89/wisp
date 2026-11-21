@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct MercuryApp: App {
+struct WispApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {

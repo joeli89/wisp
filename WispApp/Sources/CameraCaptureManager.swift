@@ -8,7 +8,7 @@ import CoreImage
 final class CameraCaptureManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
-    private let queue = DispatchQueue(label: "com.mercury.camera")
+    private let queue = DispatchQueue(label: "com.wisp.camera")
 
     /// Frame sink — set by the recorder while recording, cleared otherwise.
     var onFrame: ((CVPixelBuffer) -> Void)?
@@ -51,7 +51,7 @@ final class CameraCaptureManager: NSObject, AVCaptureVideoDataOutputSampleBuffer
         } else {
             device = Self.availableCameras().first ?? AVCaptureDevice.default(for: .video)
         }
-        guard let device else { throw NSError(domain: "Mercury", code: -10,
+        guard let device else { throw NSError(domain: "Wisp", code: -10,
             userInfo: [NSLocalizedDescriptionKey: "No camera available."]) }
 
         session.beginConfiguration()

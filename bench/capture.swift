@@ -1,5 +1,5 @@
 // Records the main display to ProRes 422 HQ at 1920x1080 via ScreenCaptureKit
-// (same capture path as Mercury). Used as the lossless-ish benchmark reference.
+// (same capture path as Wisp). Used as the lossless-ish benchmark reference.
 // Usage: swift bench/capture.swift <out.mov> <seconds>
 import Foundation
 import ScreenCaptureKit

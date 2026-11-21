@@ -157,7 +157,7 @@ final class RecordingController: ObservableObject {
         }
         phoneManager.onDisconnected = { [weak self] in
             Task { @MainActor in
-                self?.handleUnexpectedStop(NSError(domain: "Mercury", code: -22,
+                self?.handleUnexpectedStop(NSError(domain: "Wisp", code: -22,
                     userInfo: [NSLocalizedDescriptionKey: "iPhone was disconnected."]))
             }
         }
@@ -399,7 +399,7 @@ final class RecordingController: ObservableObject {
 
         if useCamera { _ = await Permissions.ensureCamera() }
         if useMic, !(await Permissions.ensureMicrophone()) {
-            status = "Microphone access is off. Allow Mercury in System Settings → Privacy & Security → Microphone."
+            status = "Microphone access is off. Allow Wisp in System Settings → Privacy & Security → Microphone."
             AppLog.log(status)
             return
         }
@@ -476,7 +476,7 @@ final class RecordingController: ObservableObject {
             : "\(width)×\(height) @ \(fps)fps  (scale \(captureScale.rawValue))"
         AppLog.log("""
 
-        ════════ Mercury recording ════════
+        ════════ Wisp recording ════════
         \(AppLog.timestamp())
         File:          \(url.lastPathComponent)
         Source:        \(sourceDesc)
@@ -779,7 +779,7 @@ final class RecordingController: ObservableObject {
     }
 
     /// Reveal a file in Finder and bring Finder to the front. `activateFileViewerSelecting`
-    /// alone can leave the Finder window behind since Mercury is a
+    /// alone can leave the Finder window behind since Wisp is a
     /// non-activating panel app, so we explicitly activate Finder too.
     static func revealInFinder(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -792,7 +792,7 @@ final class RecordingController: ObservableObject {
     static func newFilename() -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd-HHmmss"
-        return "Mercury-\(f.string(from: Date())).mp4"
+        return "Wisp-\(f.string(from: Date())).mp4"
     }
 
     func chooseOutputFolder() {

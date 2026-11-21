@@ -1,6 +1,6 @@
 # Memory / Working Notes
 
-Persistent context for working on Mercury: decisions, gotchas, and environment facts. Append as you learn.
+Persistent context for working on Wisp: decisions, gotchas, and environment facts. Append as you learn.
 
 ## Environment (verified 2026-08-28)
 - macOS 26.6.1 (build 25G76)

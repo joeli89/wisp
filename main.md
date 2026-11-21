@@ -1,4 +1,4 @@
-# Mercury
+# Wisp
 
 A simple, fully-local macOS screen recorder — record your screen with a webcam overlay plus microphone and system audio, and get a clean MP4 out. Nothing touches the cloud.
 
@@ -11,14 +11,14 @@ v1 in development: reliable "plain" recording (screen + webcam bubble + mic + sy
 ## Repository layout
 
 ```
-Mercury/
+Wisp/
 ├── main.md          # This file — project overview
 ├── changelog.md     # Human-readable history of notable changes
 ├── memory.md        # Working notes, decisions, gotchas, environment facts
-└── MercuryApp/    # The actual macOS app (Swift + SwiftUI + Xcode project)
+└── WispApp/    # The actual macOS app (Swift + SwiftUI + Xcode project)
 ```
 
-## The app (MercuryApp)
+## The app (WispApp)
 
 - **Language / UI:** Swift 6 + SwiftUI
 - **Deployment target:** macOS 15+ (developed on macOS 26)
@@ -31,9 +31,9 @@ Mercury/
 ### Build & run
 
 ```bash
-cd MercuryApp
-xcodegen generate      # produces Mercury.xcodeproj
-open Mercury.xcodeproj
+cd WispApp
+xcodegen generate      # produces Wisp.xcodeproj
+open Wisp.xcodeproj
 # Build & Run in Xcode (⌘R)
 ```
 

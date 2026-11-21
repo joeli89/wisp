@@ -1,6 +1,6 @@
-name: Mercury
+name: Wisp
 options:
-  bundleIdPrefix: com.mercury
+  bundleIdPrefix: com.wisp
   deploymentTarget:
     macOS: "15.0"
   createIntermediateGroups: true
@@ -10,7 +10,7 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
-    PRODUCT_NAME: Mercury
+    PRODUCT_NAME: Wisp
     # Stable code signing so macOS TCC grants (Screen Recording, Camera, Mic)
     # persist across rebuilds instead of resetting like ad-hoc signing does.
     DEVELOPMENT_TEAM: "Z9F537W27X"
@@ -19,7 +19,7 @@ settings:
     ENABLE_HARDENED_RUNTIME: YES
 
 targets:
-  Mercury:
+  Wisp:
     type: application
     platform: macOS
     deploymentTarget: "15.0"
@@ -34,7 +34,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mercury.Mercury
         INFOPLIST_FILE: Info.plist
-        CODE_SIGN_ENTITLEMENTS: Mercury.entitlements
+        CODE_SIGN_ENTITLEMENTS: Wisp.entitlements
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_APP_SANDBOX: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

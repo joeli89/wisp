@@ -6,7 +6,7 @@ import Darwin
 /// and, optionally, one audio track. All mutation happens on a private serial
 /// queue so it is safe to call from the capture callbacks.
 final class MovieWriter {
-    private let queue = DispatchQueue(label: "com.mercury.moviewriter")
+    private let queue = DispatchQueue(label: "com.wisp.moviewriter")
     private let writer: AVAssetWriter
     private let videoInput: AVAssetWriterInput
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
@@ -182,7 +182,7 @@ final class MovieWriter {
                         }
                     }
                 } else {
-                    let err = self.writer.error ?? NSError(domain: "Mercury", code: -1,
+                    let err = self.writer.error ?? NSError(domain: "Wisp", code: -1,
                         userInfo: [NSLocalizedDescriptionKey: "Writer never started (status \(self.writer.status.rawValue))."])
                     AppLog.log("Writer error:  \(Self.describe(err))")
                     continuation.resume(returning: .failure(err))

@@ -6,7 +6,7 @@ enum NativeCompressor {
                          progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let asset = AVURLAsset(url: input)
         guard let video = try await asset.loadTracks(withMediaType: .video).first else {
-            throw NSError(domain: "Mercury", code: 1, userInfo: [NSLocalizedDescriptionKey: "No video track"])
+            throw NSError(domain: "Wisp", code: 1, userInfo: [NSLocalizedDescriptionKey: "No video track"])
         }
         let size = try await video.load(.naturalSize)
         let assetDuration = try await asset.load(.duration)
@@ -62,7 +62,7 @@ enum NativeCompressor {
                     advanced = true
                     if let sample = source.copyNextSampleBuffer() {
                         guard destination.append(sample) else {
-                            throw writer.error ?? NSError(domain: "Mercury", code: 2)
+                            throw writer.error ?? NSError(domain: "Wisp", code: 2)
                         }
                         if index == 0 {
                             progress(min(1, CMSampleBufferGetPresentationTimeStamp(sample).seconds / duration))
@@ -75,10 +75,10 @@ enum NativeCompressor {
                 if writer.status == .failed { throw writer.error! }
                 if !advanced { try await Task.sleep(for: .milliseconds(2)) }
             }
-            guard reader.status == .completed else { throw reader.error ?? NSError(domain: "Mercury", code: 3) }
+            guard reader.status == .completed else { throw reader.error ?? NSError(domain: "Wisp", code: 3) }
             writer.endSession(atSourceTime: assetDuration)
             await writer.finishWriting()
-            guard writer.status == .completed else { throw writer.error ?? NSError(domain: "Mercury", code: 4) }
+            guard writer.status == .completed else { throw writer.error ?? NSError(domain: "Wisp", code: 4) }
         } catch {
             reader.cancelReading()
             writer.cancelWriting()

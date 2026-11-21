@@ -1,4 +1,4 @@
-# Mercury
+# Wisp
 
 A simple, fully-local macOS screen recorder. Capture your screen (or a single
 window) with an optional webcam bubble, microphone narration, and system audio,
@@ -36,22 +36,22 @@ still works but the final compression step is skipped.
 
 ```bash
 git clone <this-repo>
-cd Mercury/MercuryApp
+cd Wisp/WispApp
 
 # 1. Point signing at YOUR team (see "Code signing" below), then:
-xcodegen generate        # produces Mercury.xcodeproj from project.yml
-open Mercury.xcodeproj
+xcodegen generate        # produces Wisp.xcodeproj from project.yml
+open Wisp.xcodeproj
 
-# 2. In Xcode: select the "Mercury" scheme and Build & Run (⌘R)
+# 2. In Xcode: select the "Wisp" scheme and Build & Run (⌘R)
 ```
 
 Or build entirely from the command line:
 
 ```bash
-cd MercuryApp
+cd WispApp
 xcodegen generate
-xcodebuild -project Mercury.xcodeproj -scheme Mercury -configuration Debug build
-# The .app is under ~/Library/Developer/Xcode/DerivedData/Mercury-*/Build/Products/Debug/
+xcodebuild -project Wisp.xcodeproj -scheme Wisp -configuration Debug build
+# The .app is under ~/Library/Developer/Xcode/DerivedData/Wisp-*/Build/Products/Debug/
 ```
 
 The app has **no main window** — it launches as a floating vertical toolbar
@@ -115,10 +115,10 @@ tccutil reset Microphone    com.mercury.Mercury
 All output is fixed at **1920×1080** regardless of source dimensions; content is
 scaled to fit and centered on the canvas.
 
-### Source layout (`MercuryApp/Sources/`)
+### Source layout (`WispApp/Sources/`)
 
 ```
-MercuryApp.swift        App entry point + AppDelegate; creates the floating panel
+WispApp.swift        App entry point + AppDelegate; creates the floating panel
 FloatingPanel.swift       Borderless always-on-top NSPanel + auto-sizing hosting view
 ToolbarView.swift         The vertical toolbar UI (record, window, camera, mic, bg, settings)
 ContentView.swift         Settings popover UI
@@ -136,13 +136,13 @@ CountdownController.swift  3-2-1 countdown before capture
 StatusController.swift / TooltipController.swift  Floating status + tooltip panels
 WindowPicker.swift        SCContentSharingPicker wrapper
 Glass.swift               Liquid Glass / material background helper
-AppLog.swift              Lightweight file logger (~/Library/Logs/Mercury/Mercury.log)
+AppLog.swift              Lightweight file logger (~/Library/Logs/Wisp/Wisp.log)
 Tapestries/               Bundled background images
 ```
 
 ### Logs
 
-Runtime logs are written to `~/Library/Logs/Mercury/Mercury.log` — useful for
+Runtime logs are written to `~/Library/Logs/Wisp/Wisp.log` — useful for
 diagnosing capture, compositing, and compression issues.
 
 ---
@@ -151,3 +151,7 @@ diagnosing capture, compositing, and compression issues.
 
 Everything is local. Recordings are written to a folder you choose on disk. There
 is no network or cloud component.
+
+### App identity
+
+Wisp retains the legacy bundle identifier `com.mercury.Mercury` to preserve existing permissions, preferences and sandbox data. The app, Xcode target, recording filenames and logs use Wisp.

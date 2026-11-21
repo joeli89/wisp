@@ -6,8 +6,8 @@ import AVFoundation
 final class ScreenCaptureManager: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private var audioCounts: [SCStreamOutputType: Int] = [:]
-    private let videoQueue = DispatchQueue(label: "com.mercury.capture.video")
-    private let audioQueue = DispatchQueue(label: "com.mercury.capture.audio")
+    private let videoQueue = DispatchQueue(label: "com.wisp.capture.video")
+    private let audioQueue = DispatchQueue(label: "com.wisp.capture.audio")
 
     var onVideo: ((CMSampleBuffer) -> Void)?
     var onSystemAudio: ((CMSampleBuffer) -> Void)?
@@ -27,13 +27,13 @@ final class ScreenCaptureManager: NSObject, SCStreamOutput, SCStreamDelegate {
                captureMic: Bool,
                micDeviceID: String?) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-        let mercuryApps = content.applications.filter {
+        let wispApps = content.applications.filter {
             $0.processID == ProcessInfo.processInfo.processIdentifier ||
             $0.bundleIdentifier == Bundle.main.bundleIdentifier
         }
         // Exclude the app, so panels opened after capture starts are excluded too.
-        let filter = SCContentFilter(display: display, excludingApplications: mercuryApps, exceptingWindows: [])
-        AppLog.log("Capture:       excluded \(mercuryApps.count) Mercury application(s)")
+        let filter = SCContentFilter(display: display, excludingApplications: wispApps, exceptingWindows: [])
+        AppLog.log("Capture:       excluded \(wispApps.count) Wisp application(s)")
         try await startCapture(filter: filter, width: width, height: height, fps: fps,
                                captureSystemAudio: captureSystemAudio, captureMic: captureMic,
                                micDeviceID: micDeviceID)

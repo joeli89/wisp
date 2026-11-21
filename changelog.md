@@ -1,6 +1,11 @@
 # Changelog
 
-All notable changes to Mercury are documented here. Newest first.
+All notable changes to Wisp are documented here. Newest first.
+
+## 2026-11-21 — Wisp
+
+- Renamed the app, project, source folder, wordmark, recording filenames, logging and repository references to Wisp.
+- Preserved the legacy bundle identifier and signing identity to retain permissions and saved settings.
 
 ## [Unreleased]
 

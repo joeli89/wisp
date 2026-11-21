@@ -5,18 +5,18 @@ import os
 /// Lightweight logging for recording sessions. Writes human-readable blocks to
 /// a log file (easy to `tail -f` or open) and also mirrors to the unified log.
 ///
-/// Log file: ~/Library/Logs/Mercury/Mercury.log
+/// Log file: ~/Library/Logs/Wisp/Wisp.log
 enum AppLog {
     private static let logger = Logger(subsystem: "com.mercury.Mercury", category: "recording")
 
     static let fileURL: URL = {
         let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Logs/Mercury", isDirectory: true)
+            .appendingPathComponent("Logs/Wisp", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("Mercury.log")
+        return dir.appendingPathComponent("Wisp.log")
     }()
 
-    private static let queue = DispatchQueue(label: "com.mercury.applog")
+    private static let queue = DispatchQueue(label: "com.wisp.applog")
 
     /// Append a line (or multi-line block) to the log file + unified log.
     static func log(_ message: String) {

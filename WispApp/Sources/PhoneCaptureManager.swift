@@ -15,8 +15,8 @@ final class PhoneCaptureManager: NSObject,
     private let videoOutput = AVCaptureVideoDataOutput()
     private let audioOutput = AVCaptureAudioDataOutput()
     private let micOutput = AVCaptureAudioDataOutput()
-    private let videoQueue = DispatchQueue(label: "com.mercury.phone.video")
-    private let audioQueue = DispatchQueue(label: "com.mercury.phone.audio")
+    private let videoQueue = DispatchQueue(label: "com.wisp.phone.video")
+    private let audioQueue = DispatchQueue(label: "com.wisp.phone.audio")
 
     var onVideo: ((CMSampleBuffer) -> Void)?
     /// Every video frame, for the live preview (independent of recording).
@@ -100,7 +100,7 @@ final class PhoneCaptureManager: NSObject,
             phone = Self.availablePhones().first
         }
         guard let phone else {
-            throw NSError(domain: "Mercury", code: -20, userInfo: [NSLocalizedDescriptionKey:
+            throw NSError(domain: "Wisp", code: -20, userInfo: [NSLocalizedDescriptionKey:
                 "No iPhone found. Connect it with a cable, unlock it, and tap Trust."])
         }
 
@@ -123,7 +123,7 @@ final class PhoneCaptureManager: NSObject,
 
             phoneInput = try AVCaptureDeviceInput(device: phone)
             guard session.canAddInput(phoneInput) else {
-                throw NSError(domain: "Mercury", code: -21, userInfo: [NSLocalizedDescriptionKey:
+                throw NSError(domain: "Wisp", code: -21, userInfo: [NSLocalizedDescriptionKey:
                     "Couldn't open \(phone.localizedName). Unlock the phone and try again."])
             }
             session.addInput(phoneInput)

@@ -1,0 +1,10 @@
+test,mode,bytes,notes
+phone_4k30,quality_0.65,2613241,145 frames zero dropped video only
+phone_4k30,vbr_3Mbps,1722751,rejected for small icon softness
+phone_4k30,vbr_4Mbps,2194564,145 frames zero dropped video only
+phone_4k30,vbr_5Mbps,2591909,145 frames zero dropped video only
+text_1080p30,quality_0.65,265916,180 frames zero dropped video only
+text_1080p30,vbr_1Mbps,548008,larger than original use skip safeguard
+text_1080p30,vbr_2Mbps,613987,larger than original use skip safeguard
+original_phone_clip,original,5454561,3840x2160 with audio
+native_optimizer,high_budget_0.72_bits_per_pixel_per_second,3350739,all 271 video samples retained audio passthrough approximately 4.8 seconds processing

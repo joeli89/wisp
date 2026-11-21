@@ -25,7 +25,14 @@ final class ScreenCaptureManager: NSObject, SCStreamOutput, SCStreamDelegate {
                captureSystemAudio: Bool,
                captureMic: Bool,
                micDeviceID: String?) async throws {
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        let mercuryApps = content.applications.filter {
+            $0.processID == ProcessInfo.processInfo.processIdentifier ||
+            $0.bundleIdentifier == Bundle.main.bundleIdentifier
+        }
+        // Exclude the app, so panels opened after capture starts are excluded too.
+        let filter = SCContentFilter(display: display, excludingApplications: mercuryApps, exceptingWindows: [])
+        AppLog.log("Capture:       excluded \(mercuryApps.count) Mercury application(s)")
         try await startCapture(filter: filter, width: width, height: height, fps: fps,
                                captureSystemAudio: captureSystemAudio, captureMic: captureMic,
                                micDeviceID: micDeviceID)

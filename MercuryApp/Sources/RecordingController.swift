@@ -22,7 +22,7 @@ enum FrameLayout: String, CaseIterable, Identifiable {
 }
 
 /// Recording quality presets — the only encoder knob users see.
-/// Values from the bench on real screen recordings (bench/go.sh).
+/// Balanced is tuned against the local screen-recording reference at 30 fps.
 enum RecordingQuality: String, CaseIterable, Identifiable {
     case small = "Small"
     case balanced = "Balanced"
@@ -32,13 +32,13 @@ enum RecordingQuality: String, CaseIterable, Identifiable {
     /// Hardware constant-quality value (0…1).
     var quality: Double {
         switch self {
-        case .small:    return 0.55   // ~470 MB/h at 1080p, VMAF ~92
-        case .balanced: return 0.70   // ~1 GB/h at 1080p, VMAF ~95
-        case .high:     return 0.75   // ~1.3 GB/h, VMAF ~96
+        case .small:    return 0.55
+        case .balanced: return 0.65
+        case .high:     return 0.70
         }
     }
     var fps: Int { self == .high ? 60 : 30 }
-    /// Bitrate ceiling so busy screens can't run away.
+    /// Encoder bitrate target; actual size varies with the scene.
     var maxBitrate: Int {
         switch self {
         case .small:    return 4_000_000
@@ -50,16 +50,15 @@ enum RecordingQuality: String, CaseIterable, Identifiable {
         switch self {
         case .small:    return "Smallest files. Fine for Slack and email."
         case .balanced: return "Sharp text, small files. Recommended."
-        case .high:     return "60 fps, near-lossless. For marketing and App Store previews."
+        case .high:     return "More detail and smoother motion at 60 fps. Larger files."
         }
     }
 }
 
-/// Output resolution. 1080p captures the display at 1× (logical pixels);
-/// 4K captures at 2× (Retina) and renders onto a 4K-class canvas.
+/// Display capture density; output follows the captured pixels without a background.
 enum CaptureScale: String, CaseIterable, Identifiable {
-    case hd  = "1080p"
-    case uhd = "4K"
+    case hd  = "Standard"
+    case uhd = "Retina"
 
     var id: String { rawValue }
     var factor: CGFloat {
@@ -70,8 +69,8 @@ enum CaptureScale: String, CaseIterable, Identifiable {
     }
     var summary: String {
         switch self {
-        case .hd:  return "Loom-sized files. Right for most demos."
-        case .uhd: return "Retina-sharp text, about twice the file size."
+        case .hd:  return "Fewer captured pixels for smaller files."
+        case .uhd: return "Preserves fine text. File size depends on content and motion."
         }
     }
 }
@@ -94,6 +93,7 @@ final class RecordingController: ObservableObject {
     // Window selection (via the native system picker).
     private var pickedWindowFilter: SCContentFilter?
     @Published var pickedWindowName: String?
+    @Published var pickedWindowID: CGWindowID?
 
     /// Camera is off by default — turning it on shows a live self-view so the
     /// user can see they're being filmed (Loom-style).
@@ -105,11 +105,9 @@ final class RecordingController: ObservableObject {
 
     @Published var recordingQuality: RecordingQuality = .balanced
     var fps: Int { recordingQuality.fps }
-    @Published var captureScale: CaptureScale = .hd
+    @Published var captureScale: CaptureScale = .uhd
 
-    // FFmpeg post-compression — optional extra step, only offered when an
-    // FFmpeg install is found on this Mac. Off by default: the hardware
-    // encoder's constant-quality mode already beats it on quality-per-byte.
+    // Preserve capture detail, then optimize the finished file when FFmpeg is installed.
     @Published var compressOutput = false
     let ffmpegAvailable = FFmpegCompressor.isAvailable
     @Published var compressionQuality: FFmpegCompressor.Quality = .medium
@@ -118,7 +116,7 @@ final class RecordingController: ObservableObject {
 
     // Background compositing (Screen Studio-style)
     @Published var layout: FrameLayout = .fullWidth
-    @Published var background: BackgroundOption = BackgroundOption.presets[4]
+    @Published var background: BackgroundOption = .none
     @Published var outputFolder: URL = FileManager.default
         .urls(for: .moviesDirectory, in: .userDomainMask).first
         ?? FileManager.default.homeDirectoryForCurrentUser
@@ -192,9 +190,15 @@ final class RecordingController: ObservableObject {
             self?.refreshPhones()
         }
 
+        await refreshDisplays()
+    }
+
+    func refreshDisplays() async {
         do {
             displays = try await ScreenCaptureManager.availableDisplays()
-            if selectedDisplayID == nil { selectedDisplayID = displays.first?.displayID }
+            if !displays.contains(where: { $0.displayID == selectedDisplayID }) {
+                selectedDisplayID = displays.first?.displayID
+            }
         } catch {
             status = "Could not list displays. Grant Screen Recording permission."
         }
@@ -204,7 +208,14 @@ final class RecordingController: ObservableObject {
     func refreshPhones() {
         phones = PhoneCaptureManager.availablePhones()
         if selectedPhone == nil { selectedPhoneID = phones.first?.uniqueID }
+        AppLog.log("SPIKE sandbox=\(Self.isSandboxed) phones=\(phones.count) "
+                   + "[\(phones.map(\.localizedName).joined(separator: ", "))]")
     }
+
+    /// True when the process is running inside the App Sandbox. Used by the
+    /// Mac App Store viability spike to label log output unambiguously.
+    static let isSandboxed: Bool =
+        ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
 
     /// Source menu: record a whole display.
     func selectDisplaySource(_ displayID: CGDirectDisplayID? = nil) {
@@ -281,6 +292,24 @@ final class RecordingController: ObservableObject {
 
         do {
             try cameraManager.start(deviceID: selectedCameraID)
+            cameraPreview?.onPlacementChanged = { [weak self] frame in
+                self?.compositor?.updateCameraPlacement(frame)
+            }
+            cameraPreview?.onShapeChanged = { [weak self] fraction in
+                self?.compositor?.updateCameraShape(fraction)
+            }
+            cameraPreview?.onRemoveBackgroundChanged = { [weak self] enabled in
+                self?.cameraManager.removeBackground = enabled
+                self?.compositor?.clearCameraFrame()
+            }
+            cameraManager.removeBackground = cameraPreview?.removesBackground ?? false
+            cameraManager.onCutoutFrame = { [weak self] image in
+                Task { @MainActor in
+                    guard let self, self.enableCamera, self.cameraPreview?.removesBackground == true else { return }
+                    self.cameraPreview?.showCutout(image)
+                    self.compositor?.updateCameraCutout(image)
+                }
+            }
             cameraPreview?.show(session: cameraManager.session)
         } catch {
             status = "Camera error: \(error.localizedDescription)"
@@ -298,9 +327,20 @@ final class RecordingController: ObservableObject {
         guard let filter = await picker.pickWindow() else { return false }
         pickedWindowFilter = filter
         pickedWindowName = WindowPicker.displayName(for: filter)
+        if #available(macOS 15.2, *) { pickedWindowID = filter.includedWindows.first?.windowID }
         captureSource = .window
         status = "Ready — \(pickedWindowName ?? "window") selected."
         return true
+    }
+
+    func selectWindow(_ window: SCWindow) {
+        guard !isRecording else { return }
+        pickedWindowFilter = SCContentFilter(desktopIndependentWindow: window)
+        pickedWindowID = window.windowID
+        pickedWindowName = [window.owningApplication?.applicationName, window.title]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " — ")
+        captureSource = .window
+        status = "Ready — \(pickedWindowName ?? "window") selected."
     }
 
     func openScreenRecordingSettings() {
@@ -312,7 +352,7 @@ final class RecordingController: ObservableObject {
     // MARK: - Recording
 
     func start() async {
-        guard !isRecording, !isCountingDown else { return }
+        guard !isRecording, !isCountingDown, !isCompressing else { return }
 
         // In window mode, make sure we have a window chosen; present the native
         // picker if not (this is the click-to-select flow).
@@ -406,9 +446,7 @@ final class RecordingController: ObservableObject {
         // output folder only ever contains the finished (compressed) file.
         let filename = Self.newFilename()
         let finalURL = outputFolder.appendingPathComponent(filename)
-        let url = (compressOutput && ffmpegAvailable)
-            ? FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-            : finalURL
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         pendingFinalURL = finalURL
 
         // ── Log the recording settings ────────────────────────────────────
@@ -456,6 +494,10 @@ final class RecordingController: ObservableObject {
                                              canvasWidth: canvas.width,
                                              canvasHeight: canvas.height)
             compositor.cameraWidthFraction = cameraWidthFraction
+            compositor.updateCameraShape(cameraPreview?.cornerFraction ?? 0.5)
+            if let placement = cameraPreview?.normalizedFrame {
+                compositor.updateCameraPlacement(placement)
+            }
             if captureSource == .phone { compositor.contentCornerFraction = 0.12 }
             self.compositor = compositor
 
@@ -598,10 +640,7 @@ final class RecordingController: ObservableObject {
             if compressOutput && ffmpegAvailable {
                 await compressFile(url, to: finalURL, rawSize: rawSize)
             } else {
-                lastOutputURL = url
-                status = "Saved to \(url.lastPathComponent)"
-                AppLog.log("Compression:   off — final \(AppLog.size(rawSize))\n═════════════════════════════════════")
-                Self.revealInFinder(url)
+                await optimizeNativeFile(url, to: finalURL)
             }
         case .failure(let error):
             status = "Save failed: \(error.localizedDescription)"
@@ -609,6 +648,36 @@ final class RecordingController: ObservableObject {
         case .none:
             status = "Stopped."
         }
+    }
+
+    private func optimizeNativeFile(_ input: URL, to output: URL) async {
+        isCompressing = true
+        compressionProgress = 0
+        status = "Optimizing…"
+        let bitsPerPixel: Double = recordingQuality == .high ? 0.72 : (recordingQuality == .small ? 0.36 : 0.60)
+        do {
+            let result = try await Task.detached {
+                try await NativeCompressor.compress(input, to: output, bitsPerPixel: bitsPerPixel) { [weak self] fraction in
+                    Task { @MainActor in
+                        self?.compressionProgress = fraction
+                    }
+                }
+            }.value
+            lastOutputURL = result
+            let size = (try? FileManager.default.attributesOfItem(atPath: result.path)[.size] as? Int) ?? 0
+            status = "Saved \(result.lastPathComponent) — \(AppLog.size(size))"
+            AppLog.log("Native HEVC:    final \(AppLog.size(size))")
+            Self.revealInFinder(result)
+        } catch {
+            if !FileManager.default.fileExists(atPath: output.path) {
+                try? FileManager.default.moveItem(at: input, to: output)
+            }
+            lastOutputURL = FileManager.default.fileExists(atPath: output.path) ? output : input
+            status = "Saved original — optimization unavailable."
+            AppLog.log("Native HEVC:    kept original — \(error.localizedDescription)")
+        }
+        isCompressing = false
+        compressionProgress = 0
     }
 
     private func compressFile(_ input: URL, to output: URL, rawSize: Int) async {

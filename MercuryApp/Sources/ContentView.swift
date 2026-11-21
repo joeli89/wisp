@@ -10,15 +10,8 @@ struct ContentView: View {
             Text("Settings")
                 .font(.headline)
 
-            GroupBox("Sources") {
+            GroupBox("Camera & Audio") {
                 VStack(alignment: .leading, spacing: 12) {
-                    captureSourcePicker
-                    switch controller.captureSource {
-                    case .display: displayPicker
-                    case .window: windowPicker
-                    case .phone: phonePicker
-                    }
-                    Divider()
                     cameraRow
                     micRow
                     HStack(spacing: 4) {
@@ -58,9 +51,10 @@ struct ContentView: View {
                     }
                     Text(controller.recordingQuality.summary)
                         .font(.caption).foregroundStyle(.secondary)
-                        .padding(.leading, 124)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 128)
                     HStack {
-                        labelWithHint("Resolution", "1080p is what Loom and most screen recorders produce. 4K captures Retina detail so small text stays crisp, at roughly twice the size.")
+                        labelWithHint("Resolution", "Retina preserves fine text using the display's rendered pixels. Standard captures fewer pixels for smaller files. File size depends on screen content and motion.")
                         Picker("", selection: $controller.captureScale) {
                             ForEach(CaptureScale.allCases) { s in
                                 Text(s.rawValue).tag(s)
@@ -70,25 +64,19 @@ struct ContentView: View {
                         .pickerStyle(.segmented)
                         .disabled(controller.isRecording || controller.captureSource == .phone)
                     }
-                    Text(controller.captureSource == .phone
-                         ? "iPhone recordings always use the phone's native resolution."
-                         : controller.captureScale.summary)
-                        .font(.caption).foregroundStyle(.secondary)
-                        .padding(.leading, 124)
-
                     if controller.ffmpegAvailable {
                         Divider()
 
                         HStack(spacing: 4) {
-                            Toggle("Extra compression (FFmpeg)", isOn: $controller.compressOutput)
+                            Toggle("Optimize file size (FFmpeg)", isOn: $controller.compressOutput)
                                 .disabled(controller.isRecording || controller.isCompressing)
                                 .fixedSize()
-                            helpHint("Re-encode with x265 after you stop. Slightly smaller files, but it takes about as long as the recording itself. Usually not worth it.")
+                            helpHint("Compress after recording while keeping the original resolution and frame rate. Processing time depends on the recording and your Mac. Keeps the original if compression would make it larger.")
                             Spacer()
                         }
                         if controller.compressOutput {
                             HStack {
-                                labelWithHint("Level", "Small = tiniest files, Quality = near-lossless.")
+                                labelWithHint("Level", "Small prioritizes file size. Balanced preserves text detail. Quality retains more fine detail.")
                                 Picker("", selection: $controller.compressionQuality) {
                                     ForEach(FFmpegCompressor.Quality.allCases) { q in
                                         Text(q.rawValue).tag(q)
@@ -110,7 +98,8 @@ struct ContentView: View {
                     .lineLimit(2)
             }
         }
-        .padding(16)
+        .frame(width: 420, alignment: .leading)
+        .padding(20)
     }
 
     // MARK: - Help hint
@@ -131,67 +120,6 @@ struct ContentView: View {
 
     // MARK: - Pickers
 
-    private var captureSourcePicker: some View {
-        HStack {
-            labelWithHint("Capture", "Record your entire display, a single window, or an iPhone connected by USB.")
-            Picker("", selection: $controller.captureSource) {
-                ForEach(CaptureSource.allCases) { source in
-                    Text(source.rawValue).tag(source)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .disabled(controller.isRecording)
-        }
-    }
-
-    private var displayPicker: some View {
-        Picker("Display", selection: $controller.selectedDisplayID) {
-            ForEach(controller.displays, id: \.displayID) { d in
-                Text("Display \(d.displayID) — \(d.width)×\(d.height)")
-                    .tag(Optional(d.displayID))
-            }
-        }
-        .disabled(controller.isRecording)
-    }
-
-    private var windowPicker: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "macwindow")
-                .foregroundStyle(.secondary)
-            Text(controller.pickedWindowName ?? "No window selected")
-                .lineLimit(1).truncationMode(.middle)
-                .foregroundStyle(controller.pickedWindowName == nil ? .secondary : .primary)
-            Spacer()
-            Button(controller.pickedWindowName == nil ? "Choose Window…" : "Change…") {
-                Task { await controller.chooseWindow() }
-            }
-            .disabled(controller.isRecording)
-        }
-    }
-
-    private var phonePicker: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "iphone")
-                .foregroundStyle(.secondary)
-            if controller.phones.isEmpty {
-                Text("No iPhone found. Connect it with a cable, unlock it, and tap Trust.")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer()
-                Button("Refresh") { controller.refreshPhones() }
-            } else {
-                Picker("", selection: $controller.selectedPhoneID) {
-                    ForEach(controller.phones, id: \.uniqueID) { d in
-                        Text(d.localizedName).tag(Optional(d.uniqueID))
-                    }
-                }
-                .labelsHidden()
-                .disabled(controller.isRecording)
-            }
-        }
-    }
-
     private var cameraRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
@@ -209,19 +137,7 @@ struct ContentView: View {
                 .frame(maxWidth: 190)
                 .disabled(controller.isRecording || !controller.enableCamera)
             }
-            if controller.enableCamera {
-                HStack {
-                    labelWithHint("Camera size", "How large the camera bubble appears in the recording.")
-                    Picker("", selection: $controller.cameraWidthFraction) {
-                        Text("S").tag(CGFloat(0.10))
-                        Text("M").tag(CGFloat(0.13))
-                        Text("L").tag(CGFloat(0.20))
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .disabled(controller.isRecording)
-                }
-            }
+
         }
     }
 
@@ -263,7 +179,6 @@ private struct HelpHint: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(width: 220, alignment: .leading)
                     .padding(12)
-                    .preferredColorScheme(.dark)
             }
     }
 }

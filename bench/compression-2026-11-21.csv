@@ -1,0 +1,7 @@
+pipeline,quality,bytes,frames,dropped_frames,notes
+original,High,5454561,,,5.077s 3840x2160 60fps with audio
+ffmpeg,CRF24,2667514,,,same resolution and timestamps audio copied
+ffmpeg,CRF26,2159762,,,more visible artifacts rejected
+native,0.75,5957610,267,0,decoded sample re-encoded without audio at 60fps
+native,0.70,5259230,267,0,chosen High comparison is against native 0.75
+native,0.65,3968009,267,0,chosen Balanced also checked against previous screen-text benchmark

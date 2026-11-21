@@ -1,15 +1,6 @@
 import Foundation
 
-/// Post-recording compressor that shells out to FFmpeg for CRF-based HEVC
-/// re-encoding — typically 4-10x smaller files than the AVAssetWriter output.
-///
-/// Tuned specifically for SCREEN CONTENT (flat UI, sharp text, long static
-/// stretches). Uses libx265 in Main10 (10-bit) with a long GOP, extra B-frames,
-/// edge-preserving in-loop filter settings, and edge-aware adaptive
-/// quantization. In A/B benchmarks these settings roughly halve file size vs a
-/// plain `libx265 -crf 26` encode at equivalent perceived quality (VMAF ~93),
-/// while staying HEVC/hvc1 — hardware-decoded and QuickTime/Safari-compatible
-/// on modern Macs.
+/// Local HEVC post-compression, preserving the captured resolution and frame rate.
 final class FFmpegCompressor: @unchecked Sendable {
 
     /// Quality preset — maps to libx265 CRF values.
@@ -25,9 +16,9 @@ final class FFmpegCompressor: @unchecked Sendable {
         /// libx265 CRF value (0 = lossless, 51 = worst). 28 is x265 default.
         var crf: Int {
             switch self {
-            case .low:    return 32
-            case .medium: return 28
-            case .high:   return 24
+            case .low:    return 28
+            case .medium: return 24
+            case .high:   return 22
             }
         }
 
@@ -199,6 +190,13 @@ final class FFmpegCompressor: @unchecked Sendable {
             // Clean up temp file on failure.
             try? FileManager.default.removeItem(at: tmp)
             throw CompressorError.ffmpegFailed(code: Int(proc.terminationStatus), stderr: stderr)
+        }
+
+        let originalSize = (try FileManager.default.attributesOfItem(atPath: input.path)[.size] as? NSNumber)?.int64Value ?? 0
+        let encodedSize = (try FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? NSNumber)?.int64Value ?? 0
+        if originalSize > 0 && encodedSize >= originalSize {
+            try FileManager.default.removeItem(at: tmp)
+            try FileManager.default.copyItem(at: input, to: tmp)
         }
 
         // Move the finished encode into the destination.

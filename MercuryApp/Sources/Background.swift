@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreImage
+import ImageIO
 
 /// A background the screen recording is composited onto (Screen Studio-style).
 struct BackgroundOption: Identifiable, Hashable {
@@ -16,30 +17,59 @@ struct BackgroundOption: Identifiable, Hashable {
 
     var isNone: Bool { if case .none = style { return true }; return false }
 
-    /// Built-in presets shown in the picker.
+    /// Built-in presets: "None" plus every image in the bundled `Backgrounds`
+    /// folder. Drop a file into `Backgrounds/` and it appears here — no code
+    /// change needed. The display name is derived from the filename, so name
+    /// files the way you want them labelled (`Soft-Dusk.jpg` → "Soft Dusk").
+    static let none = BackgroundOption(id: "none", name: "None", style: .none)
+
     static let presets: [BackgroundOption] = {
-        let none = BackgroundOption(id: "none", name: "None", style: .none)
-        let tapestries: [(id: String, name: String, file: String, ext: String)] = [
-            ("tapestry_01", "UK & Europe",       "Wise_Tapestry_01_UK_Europe_Orange_Blue_Lg",          "jpg"),
-            ("tapestry_02", "Australasia",        "Wise_Tapestry_02_Australasia_SAsia_Aqua_Purple_Lg", "jpg"),
-            ("tapestry_03", "Americas & E. Asia", "Wise_Tapestry_03_NAmerica_EAsia_Pink_Orange_Lg",     "jpg"),
-            ("tapestry_04", "Europe & SE Asia",   "Wise_Tapestry_04_Europe_SEAsia_Blue_Yellow_Lg",      "jpg"),
-            ("tapestry_05", "N. Europe & Africa", "Wise_Tapestry_05_NEurope_WAfrica_Dark_Green_Lg",     "jpg"),
-            ("tapestry_06", "The Americas",       "Wise_Tapestry_06_NAmerica_SAmerica_Red_Blue_Lg",     "jpg"),
-            ("tapestry_07", "Pacific",            "Wise_Tapestry_07_NAmerica_EAsia_Green_Blue_Yellow_Lg", "jpg"),
-            ("tapestry_08", "Africa & Europe",    "Wise_Tapestry_08_NAfrica_Europe_Green_Yellow_Orange_Lg", "jpg"),
-            ("tapestry_09", "Latin America",      "Wise_Tapestry_09_C+SAmerica_Europe_Pink_Yellow_Lg",  "jpg"),
-            ("tapestry_10", "Middle East",        "Wise_Tapestry_10_MiddleEast_Australasia_Pink_Blue_Lg", "jpg"),
-            ("tapestry_full", "Wise World",       "Wise_Tapestry_Platform_Full_Lg_v2",                  "jpg"),
-            ("tahoe_dark",  "Tahoe Dark",         "26-Tahoe-Dark",                                      "jpeg"),
-            ("tahoe_light", "Tahoe Light",        "26-Tahoe-Light",                                     "jpeg"),
-        ]
-        let imageOptions = tapestries.compactMap { t -> BackgroundOption? in
-            guard let url = Bundle.main.url(forResource: t.file, withExtension: t.ext) else { return nil }
-            return BackgroundOption(id: t.id, name: t.name, style: .image(url))
-        }
-        return [none] + imageOptions
+        [none] + bundledImages()
     }()
+
+    private static let imageExtensions: Set<String> =
+        ["jpg", "jpeg", "png", "heic", "heif", "tiff"]
+
+    private static func bundledImages() -> [BackgroundOption] {
+        guard let dir = Bundle.main.resourceURL?
+                .appendingPathComponent("Backgrounds", isDirectory: true),
+              let urls = try? FileManager.default.contentsOfDirectory(
+                  at: dir, includingPropertiesForKeys: nil,
+                  options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])
+        else {
+            AppLog.log("Backgrounds: no bundled folder found")
+            return []
+        }
+
+        let options = urls
+            .filter { imageExtensions.contains($0.pathExtension.lowercased()) }
+            // localizedStandardCompare gives natural ordering, so image-2
+            // sorts before image-10 rather than after it.
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent)
+                        == .orderedAscending }
+            .map {
+                BackgroundOption(id: $0.deletingPathExtension().lastPathComponent,
+                                 name: displayName(for: $0),
+                                 style: .image($0))
+            }
+        AppLog.log("Backgrounds: \(options.count) bundled images")
+        return options
+    }
+
+    /// `26-Tahoe-Dark.jpeg` → "Tahoe Dark"; `image-1.jpg` → "Image 1".
+    private static func displayName(for url: URL) -> String {
+        var stem = url.deletingPathExtension().lastPathComponent
+        // Drop a leading sort prefix such as "26-" or "03_".
+        if let prefix = stem.range(of: "^[0-9]+[-_]", options: .regularExpression) {
+            stem.removeSubrange(prefix)
+        }
+        return stem
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
 
     /// A custom background from a user-picked image file.
     static func custom(_ url: URL) -> BackgroundOption {
@@ -97,22 +127,49 @@ extension BackgroundOption {
     }
 }
 
-/// Lightweight file-image thumbnail (AsyncImage doesn't load file URLs on macOS reliably).
-/// GeometryReader gives the image an explicit frame so aspectFill doesn't bleed
-/// outside the cell bounds.
+/// Thumbnail for a background tile. Decodes a downsampled image via
+/// CGImageSource rather than loading the full file — the bundled backgrounds
+/// run to several megabytes each, and a grid of nineteen full-resolution
+/// decodes visibly stalls the picker. Results are cached per URL.
 private struct AsyncImageOrColor: View {
     let url: URL
+
     var body: some View {
-        if let img = NSImage(contentsOf: url) {
-            GeometryReader { geo in
+        GeometryReader { geo in
+            if let img = ThumbnailCache.shared.thumbnail(
+                for: url, maxPixel: max(geo.size.width, geo.size.height) * 3) {
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFill()
                     .frame(width: geo.size.width, height: geo.size.height)
                     .clipped()
+            } else {
+                Rectangle().fill(.quaternary)
             }
-        } else {
-            Rectangle().fill(.quaternary)
         }
+    }
+}
+
+private final class ThumbnailCache {
+    static let shared = ThumbnailCache()
+    private let cache = NSCache<NSURL, NSImage>()
+
+    func thumbnail(for url: URL, maxPixel: CGFloat) -> NSImage? {
+        // Round up to a stable bucket so minor layout changes don't thrash the cache.
+        let target = max(64, (maxPixel / 64).rounded(.up) * 64)
+        let key = url as NSURL
+        if let hit = cache.object(forKey: key) { return hit }
+
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: target
+              ] as CFDictionary)
+        else { return nil }
+
+        let img = NSImage(cgImage: cg, size: .zero)
+        cache.setObject(img, forKey: key)
+        return img
     }
 }

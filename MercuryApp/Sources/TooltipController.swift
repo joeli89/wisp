@@ -18,10 +18,7 @@ struct TooltipBubble: View {
 
 // MARK: - Tooltip controller
 
-/// Manages a lightweight borderless NSPanel that renders tooltip labels.
-/// Using a *separate* window means the tooltip is never clipped by the main
-/// toolbar panel, can appear on either side depending on screen position, and
-/// aligns vertically with whichever button is hovered.
+/// Shows labels below the notch, above its native window level.
 @MainActor
 final class TooltipController: ObservableObject {
 
@@ -37,37 +34,26 @@ final class TooltipController: ObservableObject {
 
     // MARK: Public API
 
-    /// Show a tooltip next to the mouse cursor. The `buttonGlobalFrame` is no
-    /// longer needed for positioning — anchoring to the cursor avoids all
-    /// view→window→screen coordinate conversion, which was the source of the
-    /// off-screen bug.
     func show(text: String, buttonGlobalFrame: CGRect = .zero) {
+        guard let hostPanel, let hostView else { return }
         ensurePanelExists()
-
-        // Update label + measure.
         hostingView?.rootView = TooltipBubble(text: text)
         let size = measureTooltip(text: text)
 
-        // Cursor position is already in screen coordinates (bottom-left origin).
-        let mouse = NSEvent.mouseLocation
-        let screen = (NSScreen.screens.first { $0.frame.contains(mouse) }
-                      ?? NSScreen.main)?.visibleFrame ?? .zero
-
-        // ── Side selection ───────────────────────────────────────────────
-        // Place to the RIGHT of the cursor by default; flip LEFT when the
-        // toolbar is docked near the right edge and it wouldn't fit.
-        let gap: CGFloat = 16
-        var x = mouse.x + gap
-        if x + size.width > screen.maxX - 4 {
-            x = mouse.x - size.width - gap
-        }
-        // Vertically center on the cursor.
-        var y = mouse.y - size.height / 2
-
-        // Clamp fully on-screen on both axes.
+        let local = NSRect(x: buttonGlobalFrame.minX,
+                           y: hostView.isFlipped ? buttonGlobalFrame.minY : hostView.bounds.height - buttonGlobalFrame.maxY,
+                           width: buttonGlobalFrame.width, height: buttonGlobalFrame.height)
+        let button = hostPanel.convertToScreen(hostView.convert(local, to: nil))
+        let screen = hostPanel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let shelfBottom = (hostPanel as? FloatingPanel).map {
+            $0.frame.maxY - $0.interactionSize.height
+        } ?? button.minY
+        var x = button.midX - size.width / 2
+        var y = min(button.minY, shelfBottom) - size.height - 6
         x = min(max(x, screen.minX + 4), screen.maxX - size.width - 4)
         y = min(max(y, screen.minY + 4), screen.maxY - size.height - 4)
 
+        tooltipPanel?.level = NSWindow.Level(rawValue: hostPanel.level.rawValue + 1)
         tooltipPanel?.setContentSize(size)
         tooltipPanel?.setFrameOrigin(NSPoint(x: x, y: y))
         tooltipPanel?.orderFrontRegardless()
@@ -93,7 +79,7 @@ final class TooltipController: ObservableObject {
             backing: .buffered,
             defer: false
         )
-        panel.level = .floating          // same level as the toolbar
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true

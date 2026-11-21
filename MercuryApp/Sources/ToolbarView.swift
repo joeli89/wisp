@@ -13,7 +13,7 @@ private struct ButtonFrameKey: PreferenceKey {
 
 // MARK: - ToolbarView
 
-/// Minimalist vertical floating toolbar for recording controls.
+/// Recording controls that expand from the top edge of the display.
 /// The settings popover embeds the full configuration UI (ContentView).
 struct ToolbarView: View {
     @EnvironmentObject var controller: RecordingController
@@ -21,22 +21,35 @@ struct ToolbarView: View {
     @EnvironmentObject var statusController: StatusController
     @EnvironmentObject var sourceFlyout: SourceFlyoutController
 
+    var compactWidth: CGFloat = 190
+    var notchHeight: CGFloat = 0
+    var onShelfSizeChange: (CGSize) -> Void = { _ in }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expanded = false
+    @State private var insideShelf = false
+    @State private var expandTask: Task<Void, Never>?
+    @State private var collapseTask: Task<Void, Never>?
+    @State private var showSources = false
     @State private var showSettings = false
     @State private var showBackgrounds = false
     @State private var hovered: String?
     @State private var buttonFrames: [String: CGRect] = [:]
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            pill
-        }
-        .fixedSize()
+        notchShelf
+        .frame(width: 524, height: notchHeight + 540, alignment: .top)
         .task { await controller.refreshDevices() }
+        .onChange(of: showSettings) { _, _ in tooltipController.hide(); scheduleCollapse() }
+        .onChange(of: showBackgrounds) { _, _ in tooltipController.hide(); scheduleCollapse() }
+        .onChange(of: showSources) { _, _ in tooltipController.hide(); scheduleCollapse() }
+        .onDisappear { collapseTask?.cancel(); expandTask?.cancel() }
         // Collect button frames reported from within the pill
         .onPreferenceChange(ButtonFrameKey.self) { buttonFrames = $0 }
         // Drive the floating tooltip panel on hover changes
         .onChange(of: hovered) { _, id in
-            if let id, let frame = buttonFrames[id], let text = tipText(for: id) {
+            if !showSettings, !showBackgrounds, !showSources,
+               let id, let frame = buttonFrames[id], let text = tipText(for: id) {
                 tooltipController.show(text: text, buttonGlobalFrame: frame)
             } else {
                 tooltipController.hide()
@@ -44,7 +57,18 @@ struct ToolbarView: View {
         }
         // Drive the floating status panel (edge-aware, never clipped).
         .onChange(of: controller.status) { _, _ in syncStatus() }
-        .onChange(of: controller.isRecording) { _, _ in syncStatus() }
+        .onChange(of: controller.isRecording) { _, recording in
+            syncStatus()
+            if recording {
+                expandTask?.cancel()
+                collapseTask?.cancel()
+                expanded = false
+                showSettings = false
+                showBackgrounds = false
+                showSources = false
+                tooltipController.hide()
+            }
+        }
         .onChange(of: controller.isCompressing) { _, _ in syncStatus() }
     }
 
@@ -60,8 +84,7 @@ struct ToolbarView: View {
 
     private func tipText(for id: String) -> String? {
         switch id {
-        case "record":   return "Record"
-        case "discard":  return "Discard"
+        case "record":   return controller.isRecording ? "Stop recording" : "Record"
         case "camera":   return controller.enableCamera ? "Camera on" : "Camera off"
         case "mic":      return controller.enableMicrophone ? "Mic on" : "Mic off"
         case "bg":       return "Background"
@@ -73,54 +96,123 @@ struct ToolbarView: View {
 
     // MARK: - Pill
 
-    private var pill: some View {
-        VStack(spacing: 6) {
-            if controller.isCompressing {
-                compressingIndicator
-            } else {
-                // Record / Stop
-                recordButton
+    private var shelfExpanded: Bool { expanded && !controller.isRecording }
 
-                if controller.isRecording {
+    private var notchShelf: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: notchHeight)
+            if controller.isRecording {
+                HStack(spacing: 14) {
                     Text(controller.elapsedString)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.primary.opacity(0.7))
-                    discardButton
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                    recordButton
                 }
-            }
+                .frame(height: 44)
+            } else {
+                Button {
+                    collapseTask?.cancel()
+                    expandTask?.cancel()
+                    expanded.toggle()
+                    if !expanded { showSources = false }
+                } label: {
+                    HStack(spacing: 12) {
+                        if controller.isRecording || controller.isCompressing {
+                            Text(controller.isRecording ? controller.elapsedString : "SAVING \(Int(controller.compressionProgress * 100))%")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .monospacedDigit()
+                        } else {
+                            MercuryDotMark()
+                                .scaleEffect(0.78)
+                                .opacity(0.75)
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 20)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(expanded ? "Collapse Mercury controls" : "Expand Mercury controls")
 
-            divider
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        if controller.isCompressing {
+                            compressingIndicator
+                        } else {
+                            recordButton
+                        }
+                        Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 24)
+                        sourceButton
+                        cameraToggleButton
+                        micToggleButton
+                        backgroundSwatchButton
+                        iconButton("gearshape", id: "settings") { showSettings.toggle() }
+                            .popover(isPresented: $showSettings, arrowEdge: .top) {
+                                ContentView()
+                                    .environmentObject(controller)
+                                    .followsSystemAppearance()
+                            }
+                        if controller.lastOutputURL != nil { revealButton }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
 
-            // What to record: Full Screen / Window / iPhone (hover flyout)
-            sourceButton
-
-            // Toggle webcam on/off
-            cameraToggleButton
-
-            // Toggle microphone on/off
-            micToggleButton
-
-            // Background swatch — shows current, opens picker
-            backgroundSwatchButton
-
-            // Settings
-            iconButton("gearshape", id: "settings") {
-                showSettings.toggle()
-            }
-            .popover(isPresented: $showSettings, arrowEdge: .trailing) {
-                ContentView()
-                    .environmentObject(controller)
-                    .frame(width: 380)
-            }
-
-            // Reveal last recording — accented CTA once a file exists.
-            if controller.lastOutputURL != nil {
-                revealButton
+                    if showSources {
+                        SourceChooserView(dismiss: { showSources = false })
+                            .environmentObject(controller)
+                            .transition(.opacity.combined(with: .offset(y: -8)))
+                    }
+                }
+                .frame(width: showSources ? 456 : 396, height: showSources ? 406 : 80, alignment: .top)
+                .offset(y: expanded ? 0 : -16)
+                .opacity(expanded ? 1 : 0)
+                .allowsHitTesting(expanded)
+                .accessibilityHidden(!expanded)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 14)
-        .liquidGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .frame(width: shelfExpanded ? (showSources ? 480 : 420) : compactWidth + 24,
+               height: notchHeight + (controller.isRecording ? 44 : 20 + (shelfExpanded ? (showSources ? 406 : 80) : 0)), alignment: .top)
+        .background(.black)
+        .clipShape(NotchOutline(bottomRadius: shelfExpanded ? 20 : 12))
+        .environment(\.colorScheme, .dark)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            insideShelf = inside
+            guard !controller.isRecording else { return }
+            collapseTask?.cancel()
+            expandTask?.cancel()
+            if inside {
+                expandTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard !Task.isCancelled else { return }
+                    expanded = true
+                }
+            } else {
+                scheduleCollapse()
+            }
+        }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+            onShelfSizeChange(size)
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.9), value: showSources)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: controller.isRecording)
+        .animation(reduceMotion ? nil : (expanded
+            ? .spring(response: 0.52, dampingFraction: 0.62)
+            : .spring(response: 0.34, dampingFraction: 1)), value: expanded)
+    }
+
+    private func scheduleCollapse() {
+        collapseTask?.cancel()
+        guard !insideShelf, !showSettings, !showBackgrounds, !showSources else { return }
+        collapseTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            tooltipController.hide()
+            expanded = false
+        }
     }
 
     /// Show the status card only for actionable messages (not idle / recording).
@@ -141,10 +233,6 @@ struct ToolbarView: View {
             }
         } label: {
             ZStack {
-                Circle()
-                    .fill(controller.isRecording ? Color.red.opacity(0.2) : Color.clear)
-                    .frame(width: 42, height: 42)
-
                 if controller.isRecording {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .fill(.red)
@@ -152,21 +240,21 @@ struct ToolbarView: View {
                 } else {
                     Circle()
                         .fill(.red)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 16, height: 16)
                 }
             }
             .frame(width: 42, height: 42)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(controller.isRecording ? "Stop recording" : "Start recording")
         .onHover { inside in hovered = inside ? "record" : nil }
         .scaleEffect(hovered == "record" ? 1.08 : 1.0)
         .animation(.easeOut(duration: 0.15), value: hovered)
         .background(frameTracker(id: "record"))
     }
 
-    /// Source button: hover (or click) slides out the source flyout —
-    /// Full Screen / Window / iPhone — beside the toolbar.
+    /// Expands the visual source chooser inside the notch.
     private var sourceButton: some View {
         let symbol: String
         switch controller.captureSource {
@@ -175,11 +263,12 @@ struct ToolbarView: View {
         case .phone:   symbol = "iphone"
         }
         return Button {
-            sourceFlyout.toggle()
+            showSources.toggle()
+            expanded = true
         } label: {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.primary.opacity(hovered == "source" || sourceFlyout.isShown ? 1.0 : 0.65))
+                .foregroundStyle(.primary.opacity(hovered == "source" || showSources ? 1.0 : 0.65))
                 .frame(width: 36, height: 36)
                 .contentShape(Rectangle())
         }
@@ -187,7 +276,7 @@ struct ToolbarView: View {
         .disabled(controller.isRecording)
         .onHover { inside in
             hovered = inside ? "source" : nil
-            if !controller.isRecording { sourceFlyout.buttonHover(inside) }
+
         }
         .animation(.easeOut(duration: 0.15), value: hovered)
         .background(frameTracker(id: "source"))
@@ -244,7 +333,7 @@ struct ToolbarView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary)
                 .frame(width: 34, height: 34)
-                .background(Color.accentColor, in: Circle())
+
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -252,23 +341,6 @@ struct ToolbarView: View {
         .scaleEffect(hovered == "folder" ? 1.1 : 1.0)
         .animation(.easeOut(duration: 0.15), value: hovered)
         .background(frameTracker(id: "folder"))
-    }
-
-    /// Discard the in-progress recording without saving (Loom-style trash).
-    private var discardButton: some View {
-        Button {
-            Task { await controller.cancel() }
-        } label: {
-            Image(systemName: "trash")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.primary.opacity(hovered == "discard" ? 1.0 : 0.6))
-                .frame(width: 28, height: 24)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { inside in hovered = inside ? "discard" : nil }
-        .scaleEffect(hovered == "discard" ? 1.12 : 1.0)
-        .animation(.easeOut(duration: 0.15), value: hovered)
     }
 
     /// Clear "processing" state shown in place of the record button while the
@@ -317,8 +389,9 @@ struct ToolbarView: View {
         .onHover { inside in hovered = inside ? "bg" : nil }
         .scaleEffect(hovered == "bg" ? 1.08 : 1.0)
         .animation(.easeOut(duration: 0.15), value: hovered)
-        .popover(isPresented: $showBackgrounds, arrowEdge: .trailing) {
+        .popover(isPresented: $showBackgrounds, arrowEdge: .top) {
             backgroundPopover
+                .followsSystemAppearance()
         }
         .background(frameTracker(id: "bg"))
     }
@@ -415,5 +488,65 @@ struct ToolbarView: View {
                 .preference(key: ButtonFrameKey.self,
                             value: [id: geo.frame(in: .global)])
         }
+    }
+}
+
+private struct MercuryDotMark: View {
+    private let glyphs = [
+        ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+        ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+        ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+        ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
+        ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+        ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+        ["10001", "10001", "01010", "00100", "00100", "00100", "00100"]
+    ]
+
+    var body: some View {
+        Canvas { context, _ in
+            for (letter, rows) in glyphs.enumerated() {
+                for (row, bits) in rows.enumerated() {
+                    for (column, bit) in bits.enumerated() where bit == "1" {
+                        let dot = CGRect(x: CGFloat(letter * 6 + column) * 2,
+                                         y: CGFloat(row) * 2, width: 1.4, height: 1.4)
+                        context.fill(Path(ellipseIn: dot), with: .color(.white.opacity(0.9)))
+                    }
+                }
+            }
+        }
+        .frame(width: 82, height: 14)
+        .accessibilityLabel("Mercury")
+    }
+}
+
+private struct NotchOutline: Shape {
+    var bottomRadius: CGFloat
+
+    var animatableData: CGFloat {
+        get { bottomRadius }
+        set { bottomRadius = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let shoulder: CGFloat = 12
+        let left = rect.minX + shoulder
+        let right = rect.maxX - shoulder
+        let radius = min(bottomRadius, (right - left) / 2, (rect.height - shoulder) / 2)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addQuadCurve(to: CGPoint(x: right, y: rect.minY + shoulder),
+                          control: CGPoint(x: right, y: rect.minY))
+        path.addLine(to: CGPoint(x: right, y: rect.maxY - radius))
+        path.addQuadCurve(to: CGPoint(x: right - radius, y: rect.maxY),
+                          control: CGPoint(x: right, y: rect.maxY))
+        path.addLine(to: CGPoint(x: left + radius, y: rect.maxY))
+        path.addQuadCurve(to: CGPoint(x: left, y: rect.maxY - radius),
+                          control: CGPoint(x: left, y: rect.maxY))
+        path.addLine(to: CGPoint(x: left, y: rect.minY + shoulder))
+        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.minY),
+                          control: CGPoint(x: left, y: rect.minY))
+        path.closeSubpath()
+        return path
     }
 }

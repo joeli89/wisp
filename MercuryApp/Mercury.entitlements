@@ -3,10 +3,16 @@
 <plist version="1.0">
 <dict>
 	<key>com.apple.security.app-sandbox</key>
-	<false/>
+	<true/>
 	<key>com.apple.security.device.camera</key>
 	<true/>
 	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- Output folder chosen by the user via NSOpenPanel. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- Default output location (~/Movies). -->
+	<key>com.apple.security.assets.movies.read-write</key>
 	<true/>
 </dict>
 </plist>

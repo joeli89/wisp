@@ -1,0 +1,4 @@
+candidate,quality,source,start_seconds,duration_seconds,width,height,fps,audio,frames,dropped_frames,bytes,vmaf_mean
+previous_balanced,0.70,bench/out/reference.mov,30,12,1920,1080,30,none,360,0,1222063,95.173274
+new_balanced,0.68,bench/out/reference.mov,30,12,1920,1080,30,none,360,0,1079644,94.799423
+smaller_candidate,0.65,bench/out/reference.mov,30,12,1920,1080,30,none,360,0,872100,93.930422

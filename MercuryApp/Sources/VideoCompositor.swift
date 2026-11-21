@@ -8,28 +8,19 @@ import AppKit
 /// (solid / gradient / image) with the screen inset on top — rounded corners and
 /// a drop shadow, Screen Studio-style — plus an optional webcam bubble overlay.
 ///
-/// The output canvas is always a fixed 1920×1080 (Full HD) regardless of the
-/// captured source dimensions, so every recording is the same size.  Content is
-/// scaled to fit the padded canvas area (maintaining aspect ratio).
+/// Without a background, preserve the source pixels to keep text sharp and
+/// avoid encoding extra pixels introduced by upscaling.
 ///
 /// Everything that doesn't change frame-to-frame (background, shadow, rounded
 /// mask, content placement) is computed once and cached.
 final class VideoCompositor {
     // MARK: - Output canvas
     //
-    // No background: the content IS the video — 1920 wide for landscape
-    // sources, 1080 wide for portrait ones, height from the source's aspect.
-    // Background + Full width: a fixed 1920×1080 presentation frame with the
-    // content centred inside a margin.
-    // Background + Hug: the frame wraps the content plus the margin.
-    //
-    // Sources sharper than 1080p (Retina capture at 1.5x/2x, the iPhone's
-    // native 1206-wide screen) get a 4K-class canvas — 3840 / 2160 wide —
-    // so their detail isn't thrown away. Constant-quality encoding means the
-    // file only grows where there is real detail.
+    // Background layouts use HD or 4K presentation canvases. Content-only
+    // recordings retain the capture dimensions, rounded up for HEVC.
     static let landscapeWidth = 1920
     static let portraitWidth  = 1080
-    static let marginFraction: CGFloat = 0.05   // of canvas width
+    static let marginFraction: CGFloat = 0.03   // of canvas width
     let canvasWidth: Int
     let canvasHeight: Int
 
@@ -37,6 +28,9 @@ final class VideoCompositor {
     static func canvasSize(forSourceWidth w: Int, height h: Int,
                            hasBackground: Bool, fullWidth: Bool) -> (width: Int, height: Int) {
         guard w > 0, h > 0 else { return (landscapeWidth, landscapeWidth * 9 / 16) }
+        if !hasBackground {
+            return (max(2, w + w % 2), max(2, h + h % 2))
+        }
         // 1x when the source fits in 1080p; 2x (4K-class) when it's sharper.
         let sharp = h > w ? (w > portraitWidth) : (w > landscapeWidth)
         let mult = sharp ? 2 : 1
@@ -60,12 +54,13 @@ final class VideoCompositor {
     /// Glass bezel around the content (backgrounds only): width as a fraction
     /// of the content's shorter side, capped in pixels. Mirrors the live
     /// preview's Liquid Glass border.
-    var bezelFraction: CGFloat = 0.033
-    var bezelMaxWidth: CGFloat = 32
+    var bezelFraction: CGFloat = 0.01
+    var bezelMaxWidth: CGFloat = 10
 
     private let ciContext: CIContext
     private let lock = NSLock()
     private var latestCamera: CIImage?
+    private var cameraIsCutout = false
 
     private var pool: CVPixelBufferPool?
     private var poolWidth = 0
@@ -110,11 +105,19 @@ final class VideoCompositor {
 
     func updateCamera(_ pixelBuffer: CVPixelBuffer) {
         let image = CIImage(cvPixelBuffer: pixelBuffer)
-        lock.lock(); latestCamera = image; lock.unlock()
+        lock.lock(); latestCamera = image; cameraIsCutout = false; lock.unlock()
+    }
+
+    func updateCameraCutout(_ image: CGImage) {
+        lock.lock(); latestCamera = CIImage(cgImage: image); cameraIsCutout = true; lock.unlock()
+    }
+
+    func clearCameraFrame() {
+        lock.lock(); latestCamera = nil; lock.unlock()
     }
 
     func composite(_ src: CVPixelBuffer) -> CVPixelBuffer {
-        lock.lock(); let cam = latestCamera; lock.unlock()
+        lock.lock(); let cam = latestCamera; let isCutout = cameraIsCutout; lock.unlock()
         let hasCamera = showCamera && cam != nil
         let hasBackground = !background.isNone
 
@@ -141,10 +144,13 @@ final class VideoCompositor {
         }
 
         var canvas: CIImage
+        let cameraContentRect: CGRect
 
         if hasBackground {
             let layout = layoutFor(canvasWidth: cw, canvasHeight: ch,
                                    sourceWidth: srcW, sourceHeight: srcH)
+            cameraContentRect = CGRect(x: 0, y: 0, width: srcW, height: srcH)
+                .applying(layout.contentTransform)
             // Inset + rounded screen content.
             let content = base
                 .transformed(by: layout.contentTransform)
@@ -161,6 +167,7 @@ final class VideoCompositor {
             let scaledH = CGFloat(srcH) * fitScale
             let dx = (CGFloat(cw) - scaledW) / 2
             let dy = (CGFloat(ch) - scaledH) / 2
+            cameraContentRect = CGRect(x: dx, y: dy, width: scaledW, height: scaledH)
             let t = CGAffineTransform(scaleX: fitScale, y: fitScale)
                 .concatenating(CGAffineTransform(translationX: dx, y: dy))
             canvas = base.transformed(by: t)
@@ -168,7 +175,7 @@ final class VideoCompositor {
         }
 
         if hasCamera, let cam {
-            canvas = cameraOverlay(cam, frameWidth: cw).composited(over: canvas)
+            canvas = cameraOverlay(cam, contentRect: cameraContentRect, isCutout: isCutout).composited(over: canvas)
         }
 
         canvas = canvas.cropped(to: frame)
@@ -179,9 +186,19 @@ final class VideoCompositor {
 
     // MARK: - Camera bubble
 
-    var cameraCornerRadius: CGFloat = 0.18  // fraction of bubble size
+    private var cameraPlacement: CGRect?
 
-    private func cameraOverlay(_ cam: CIImage, frameWidth w: Int) -> CIImage {
+    func updateCameraPlacement(_ frame: CGRect) {
+        lock.lock(); cameraPlacement = frame; lock.unlock()
+    }
+
+    private var cameraCornerRadius: CGFloat = 0.5
+
+    func updateCameraShape(_ fraction: CGFloat) {
+        lock.lock(); cameraCornerRadius = fraction; lock.unlock()
+    }
+
+    private func cameraOverlay(_ cam: CIImage, contentRect: CGRect, isCutout: Bool) -> CIImage {
         let camExtent = cam.extent
         guard camExtent.width > 0, camExtent.height > 0 else { return cam }
 
@@ -195,7 +212,9 @@ final class VideoCompositor {
         var camImage = cam.cropped(to: cropRect)
 
         // 2. Scale to target size.
-        let targetSize = CGFloat(w) * cameraWidthFraction
+        lock.lock(); let placement = cameraPlacement; let cornerFraction = cameraCornerRadius; lock.unlock()
+        let targetSize = min(contentRect.width, contentRect.height,
+                             contentRect.width * (placement?.width ?? cameraWidthFraction))
         let scale = targetSize / side
         camImage = camImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
@@ -209,16 +228,27 @@ final class VideoCompositor {
 
         // 4. Rounded-corner mask.
         let e = camImage.extent
-        let radius = e.width * cameraCornerRadius
-        let mask = roundedRect(extent: e, radius: radius, color: .white)
-        camImage = camImage.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputBackgroundImageKey: CIImage.empty(),
-            kCIInputMaskImageKey: mask
-        ])
+        let radius = e.width * cornerFraction
+        if !isCutout {
+            let mask = roundedRect(extent: e, radius: radius, color: .white)
+            camImage = camImage.applyingFilter("CIBlendWithMask", parameters: [
+                kCIInputBackgroundImageKey: CIImage.empty(),
+                kCIInputMaskImageKey: mask
+            ])
 
-        // 5. Position in the bottom-right corner.
-        let tx = CGFloat(w) - e.width - margin
-        let ty = margin
+            let ringWidth = targetSize * (3.0 / 160.0)
+            let outer = roundedRect(extent: e, radius: radius, color: .white)
+            let inner = roundedRect(extent: e.insetBy(dx: ringWidth, dy: ringWidth),
+                                    radius: max(0, radius - ringWidth), color: .white)
+            camImage = camImage.applyingFilter("CIBlendWithMask", parameters: [
+                kCIInputBackgroundImageKey: outer,
+                kCIInputMaskImageKey: inner
+            ])
+        }
+        let centerX = contentRect.minX + (placement?.midX ?? 0.87) * contentRect.width
+        let centerY = contentRect.minY + (placement?.midY ?? 0.13) * contentRect.height
+        let tx = min(contentRect.maxX - targetSize, max(contentRect.minX, centerX - targetSize / 2))
+        let ty = min(contentRect.maxY - targetSize, max(contentRect.minY, centerY - targetSize / 2))
         return camImage.transformed(by: CGAffineTransform(translationX: tx - e.minX, y: ty - e.minY))
     }
 

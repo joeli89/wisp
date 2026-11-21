@@ -1,8 +1,10 @@
 import AVFoundation
+import Vision
+import CoreImage
 
 /// Captures webcam frames. The session can run continuously (to drive a live
-/// self-view preview) while `onFrame` is only wired to the compositor during
-/// recording. The same session also backs an `AVCaptureVideoPreviewLayer`.
+/// self-view preview). In cutout mode, Vision produces shared transparent frames
+/// for the preview and recording on the capture queue; late frames are discarded.
 final class CameraCaptureManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
@@ -10,6 +12,21 @@ final class CameraCaptureManager: NSObject, AVCaptureVideoDataOutputSampleBuffer
 
     /// Frame sink — set by the recorder while recording, cleared otherwise.
     var onFrame: ((CVPixelBuffer) -> Void)?
+
+    var onCutoutFrame: ((CGImage) -> Void)?
+    private let modeLock = NSLock()
+    private var cutoutEnabled = false
+    var removeBackground: Bool {
+        get { modeLock.lock(); defer { modeLock.unlock() }; return cutoutEnabled }
+        set { modeLock.lock(); cutoutEnabled = newValue; modeLock.unlock() }
+    }
+    private let segmentation: VNGeneratePersonSegmentationRequest = {
+        let request = VNGeneratePersonSegmentationRequest()
+        request.qualityLevel = .balanced
+        request.outputPixelFormat = kCVPixelFormatType_OneComponent8
+        return request
+    }()
+    private let imageContext = CIContext()
 
     private(set) var isRunning = false
     private var currentDeviceID: String?
@@ -66,6 +83,26 @@ final class CameraCaptureManager: NSObject, AVCaptureVideoDataOutputSampleBuffer
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard let px = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        onFrame?(px)
+        guard removeBackground else { onFrame?(px); return }
+        autoreleasepool {
+            do {
+                try VNImageRequestHandler(cvPixelBuffer: px, orientation: .up).perform([segmentation])
+                guard removeBackground, let maskBuffer = segmentation.results?.first?.pixelBuffer else { return }
+                let source = CIImage(cvPixelBuffer: px)
+                let mask = CIImage(cvPixelBuffer: maskBuffer)
+                let fittedMask = mask.transformed(by: CGAffineTransform(scaleX: source.extent.width / mask.extent.width,
+                                                                        y: source.extent.height / mask.extent.height))
+                let cutout = source.applyingFilter("CIBlendWithMask", parameters: [
+                    kCIInputBackgroundImageKey: CIImage.empty(), kCIInputMaskImageKey: fittedMask
+                ]).cropped(to: source.extent)
+                let scale = min(1, 960 / source.extent.width)
+                let scaled = cutout.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                if let image = imageContext.createCGImage(scaled, from: scaled.extent), removeBackground {
+                    onCutoutFrame?(image)
+                }
+            } catch {
+                // Keep the last cutout; never reveal the background after opting to remove it.
+            }
+        }
     }
 }

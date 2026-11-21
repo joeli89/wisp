@@ -25,12 +25,8 @@ final class MovieWriter {
     /// Encoder settings summary, for the log.
     private(set) var encoderSummary = ""
 
-    /// - quality: 0…1 for the hardware encoder's constant-quality mode
-    ///   (Apple silicon). Bits go where the picture changes, so static screen
-    ///   content costs almost nothing. Benchmarked on real screen recordings:
-    ///   0.55 ≈ VMAF 92, 0.65 ≈ 94, 0.75 ≈ 96 — all better than a 3 Mbps
-    ///   stream re-encoded with x265, with no post-processing.
-    /// - maxBitrate: ceiling (bits/s) so a chaotic screen can't balloon the file.
+    /// - quality: 0…1 hardware quality setting on Apple silicon.
+    /// - maxBitrate: average bitrate target, not a hard file-size ceiling.
     init(url: URL, width: Int, height: Int, fps: Int, hasAudio: Bool,
          quality: Double, maxBitrate: Int) throws {
         outputURL = url
@@ -44,8 +40,8 @@ final class MovieWriter {
         ]
         if Self.supportsConstantQuality {
             compression[AVVideoQualityKey] = quality
-            compression[AVVideoAverageBitRateKey] = maxBitrate   // acts as a ceiling alongside Quality
-            encoderSummary = "HEVC constant quality \(quality) (ceiling \(maxBitrate / 1000) kbps), GOP \(fps * 10)"
+            compression[AVVideoAverageBitRateKey] = maxBitrate
+            encoderSummary = "HEVC constant quality \(quality) (bitrate target \(maxBitrate / 1000) kbps), GOP \(fps * 10)"
         } else {
             // Intel: no constant-quality mode — pick a bitrate from the quality.
             let bitrate = Int(Double(width * height) * Double(fps) * (0.012 + 0.03 * quality))

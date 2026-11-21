@@ -107,6 +107,9 @@ struct ToolbarView: View {
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .monospacedDigit()
                         .foregroundStyle(.white)
+                    if controller.enableMicrophone {
+                        MicrophonePulse(level: controller.microphoneLevel)
+                    }
                     recordButton
                 }
                 .frame(height: 44)
@@ -548,5 +551,26 @@ private struct NotchOutline: Shape {
                           control: CGPoint(x: left, y: rect.minY))
         path.closeSubpath()
         return path
+    }
+}
+
+private struct MicrophonePulse: View {
+    let level: Float
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<3) { index in
+                Capsule()
+                    .fill(level > 0.02 ? Color.green.opacity(0.85) : Color.white.opacity(0.3))
+                    .frame(width: 2, height: 3 + CGFloat(level) * (index == 1 ? 11 : 7))
+            }
+        }
+        .frame(width: 10, height: 16)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: level)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Microphone input")
+        .accessibilityValue(level > 0.02 ? "Receiving audio" : "Quiet")
+        .help("Microphone input")
     }
 }

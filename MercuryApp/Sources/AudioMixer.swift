@@ -12,6 +12,14 @@ import AVFoundation
 final class AudioMixer {
     private let lock = NSLock()
     enum Source { case system, mic }
+    private var micLevel: Float = 0
+    private var micLevelTime = ProcessInfo.processInfo.systemUptime
+
+    var microphoneLevel: Float {
+        lock.lock(); defer { lock.unlock() }
+        return !finished && ProcessInfo.processInfo.systemUptime - micLevelTime < 0.25 ? micLevel : 0
+    }
+
     private var peaks: [Source: Float] = [:]
     private var bufferCounts: [Source: Int] = [:]
 
@@ -47,6 +55,12 @@ final class AudioMixer {
         guard let (startIndex, samples) = canonicalSamples(from: sampleBuffer) else { return }
         peaks[source] = max(peaks[source] ?? 0, samples.reduce(Float(0)) { max($0, abs($1)) })
         bufferCounts[source, default: 0] += 1
+        if source == .mic, !samples.isEmpty {
+            let rms = sqrt(samples.reduce(Float(0)) { $0 + $1 * $1 } / Float(samples.count))
+            let db = 20 * log10(max(rms, 0.000001))
+            micLevel = min(1, max(0, (db + 55) / 45))
+            micLevelTime = ProcessInfo.processInfo.systemUptime
+        }
         let frames = samples.count / channels
         guard frames > 0 else { return }
 

@@ -123,6 +123,7 @@ final class RecordingController: ObservableObject {
 
     // Runtime state
     @Published var isRecording = false
+    @Published var microphoneLevel: Float = 0
     @Published var elapsed: TimeInterval = 0
     @Published var status = "Ready."
     @Published var lastOutputURL: URL?
@@ -578,7 +579,7 @@ final class RecordingController: ObservableObject {
                     }
                     videoSink(sb)
                 }
-                // The phone session delivers phone audio + mic already mixed.
+                phoneManager.onMic = { [weak self] sb in self?.mixer?.append(sb, from: .mic) }
                 phoneManager.onAudio = { [weak self] sb in self?.mixer?.append(sb, from: .system) }
                 try phoneManager.start(deviceID: selectedPhoneID,
                                        includePhoneAudio: useSystemAudio,
@@ -589,11 +590,16 @@ final class RecordingController: ObservableObject {
             isRecording = true
             startDate = Date()
             elapsed = 0
+            microphoneLevel = 0
             status = "Recording…"
-            timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, let start = self.startDate else { return }
-                    self.elapsed = Date().timeIntervalSince(start)
+                    guard let self, self.isRecording, let start = self.startDate else { return }
+                    let elapsed = floor(Date().timeIntervalSince(start))
+                    if self.elapsed != elapsed { self.elapsed = elapsed }
+                    let level = self.mixer?.microphoneLevel ?? 0
+                    self.microphoneLevel = level > self.microphoneLevel ? level : self.microphoneLevel * 0.65
+                    if self.microphoneLevel < 0.01 { self.microphoneLevel = 0 }
                 }
             }
         } catch {
@@ -606,11 +612,13 @@ final class RecordingController: ObservableObject {
     func cancel() async {
         guard isRecording else { return }
         isRecording = false
+        microphoneLevel = 0
         timer?.invalidate(); timer = nil
 
         await screen?.stop()
         phoneManager.onVideo = nil
         phoneManager.onAudio = nil
+        phoneManager.onMic = nil
         cameraManager.onFrame = nil
         if !enableCamera { cameraManager.stop() }
         mixer?.finish()
@@ -628,11 +636,13 @@ final class RecordingController: ObservableObject {
         guard isRecording else { return }
         status = "Finishing…"
         isRecording = false
+        microphoneLevel = 0
         timer?.invalidate(); timer = nil
 
         await screen?.stop()
         phoneManager.onVideo = nil
         phoneManager.onAudio = nil
+        phoneManager.onMic = nil
         // Stop feeding the compositor, but keep the camera session + self-view
         // running if the camera is still enabled.
         cameraManager.onFrame = nil
@@ -747,6 +757,7 @@ final class RecordingController: ObservableObject {
     }
 
     private func teardown() async {
+        microphoneLevel = 0
         screen = nil; compositor = nil; mixer = nil; writer = nil
         startDate = nil
     }

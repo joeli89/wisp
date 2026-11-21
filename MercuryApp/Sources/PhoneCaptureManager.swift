@@ -6,8 +6,7 @@ import CoreMediaIO
 /// CoreMediaIO; after that the phone appears as an `AVCaptureDevice` with
 /// muxed (video + audio) media and behaves like any other capture device.
 ///
-/// The Mac microphone can be added to the same session; macOS mixes all audio
-/// inputs into the single audio data output, so the mixer sees one stream.
+/// The Mac microphone has its own output so metering stays separate from phone audio.
 final class PhoneCaptureManager: NSObject,
     AVCaptureVideoDataOutputSampleBufferDelegate,
     AVCaptureAudioDataOutputSampleBufferDelegate {
@@ -15,6 +14,7 @@ final class PhoneCaptureManager: NSObject,
     let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let audioOutput = AVCaptureAudioDataOutput()
+    private let micOutput = AVCaptureAudioDataOutput()
     private let videoQueue = DispatchQueue(label: "com.mercury.phone.video")
     private let audioQueue = DispatchQueue(label: "com.mercury.phone.audio")
 
@@ -22,6 +22,7 @@ final class PhoneCaptureManager: NSObject,
     /// Every video frame, for the live preview (independent of recording).
     var onPreviewFrame: ((CMSampleBuffer) -> Void)?
     var onAudio: ((CMSampleBuffer) -> Void)?
+    var onMic: ((CMSampleBuffer) -> Void)?
     /// A device was plugged in / unplugged (delivered on the main queue).
     var onDevicesChanged: (() -> Void)?
     /// The device being recorded was unplugged (main queue).
@@ -115,7 +116,7 @@ final class PhoneCaptureManager: NSObject,
             // and only rebuild the audio wiring.
             phoneInput = existing
             for input in session.inputs where input !== existing { session.removeInput(input) }
-            if session.outputs.contains(where: { $0 === audioOutput }) { session.removeOutput(audioOutput) }
+            for output in session.outputs where output === audioOutput || output === micOutput { session.removeOutput(output) }
         } else {
             for input in session.inputs { session.removeInput(input) }
             for output in session.outputs { session.removeOutput(output) }
@@ -134,22 +135,23 @@ final class PhoneCaptureManager: NSObject,
             if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
         }
 
-        // Audio: connect only the ports we want (phone audio and/or Mac mic).
+        // Keep microphone samples separate for the live input meter.
         var audioPorts: [AVCaptureInput.Port] = []
         if includePhoneAudio {
             audioPorts += phoneInput.ports.filter { $0.mediaType == .audio }
         }
+        var micPorts: [AVCaptureInput.Port] = []
         if includeMic {
             let mic = micDeviceID.flatMap { AVCaptureDevice(uniqueID: $0) } ?? AVCaptureDevice.default(for: .audio)
             if let mic, let micInput = try? AVCaptureDeviceInput(device: mic), session.canAddInput(micInput) {
                 session.addInput(micInput)
-                audioPorts += micInput.ports.filter { $0.mediaType == .audio }
+                micPorts += micInput.ports.filter { $0.mediaType == .audio }
             }
         }
-        if !audioPorts.isEmpty {
-            audioOutput.setSampleBufferDelegate(self, queue: audioQueue)
-            session.addOutputWithNoConnections(audioOutput)
-            let connection = AVCaptureConnection(inputPorts: audioPorts, output: audioOutput)
+        for (ports, output) in [(audioPorts, audioOutput), (micPorts, micOutput)] where !ports.isEmpty {
+            output.setSampleBufferDelegate(self, queue: audioQueue)
+            session.addOutputWithNoConnections(output)
+            let connection = AVCaptureConnection(inputPorts: ports, output: output)
             if session.canAddConnection(connection) { session.addConnection(connection) }
         }
 
@@ -167,6 +169,7 @@ final class PhoneCaptureManager: NSObject,
         currentDeviceID = nil
         onVideo = nil
         onAudio = nil
+        onMic = nil
         videoQueue.async { [session] in
             if session.isRunning { session.stopRunning() }
         }
@@ -183,6 +186,8 @@ final class PhoneCaptureManager: NSObject,
             }
             onPreviewFrame?(sampleBuffer)
             onVideo?(sampleBuffer)
+        } else if output === micOutput {
+            onMic?(sampleBuffer)
         } else if output === audioOutput {
             onAudio?(sampleBuffer)
         }

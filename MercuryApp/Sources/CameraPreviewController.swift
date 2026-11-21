@@ -172,6 +172,7 @@ final class CameraPreviewView: NSView {
     private let smaller = CameraControlButton(title: "", target: nil, action: nil)
     private let larger = CameraControlButton(title: "", target: nil, action: nil)
     private let shape = CameraControlButton(title: "", target: nil, action: nil)
+    private let cameraTooltip = CameraTooltip()
     private let placeholder = NSTextField(wrappingLabelWithString: "Preparing cutout…")
     private var tracking: NSTrackingArea?
     private var dragStart: CGPoint?
@@ -194,9 +195,7 @@ final class CameraPreviewView: NSView {
             shape.isEnabled = !removesBackground
             backgroundButton.contentTintColor = removesBackground ? .systemGreen : .white
             backgroundButton.state = removesBackground ? .on : .off
-            let label = removesBackground ? "Restore camera background" : "Remove camera background"
-            backgroundButton.toolTip = label
-            backgroundButton.setAccessibilityLabel(label)
+            backgroundButton.setAccessibilityValue(removesBackground ? "On" : "Off")
             CATransaction.commit()
         }
     }
@@ -224,7 +223,8 @@ final class CameraPreviewView: NSView {
     var cornerFraction: CGFloat = 0.5 {
         didSet {
             shape.image = NSImage(systemSymbolName: cornerFraction == 0.5 ? "square" : "circle", accessibilityDescription: nil)
-            shape.setAccessibilityLabel(cornerFraction == 0.5 ? "Use rounded square camera" : "Use circular camera")
+            shape.hoverText = cornerFraction == 0.5 ? "Rounded square" : "Circle"
+            shape.setAccessibilityLabel(shape.hoverText)
             needsLayout = true
         }
     }
@@ -243,8 +243,12 @@ final class CameraPreviewView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) { controls.isHidden = false }
-    override func mouseExited(with event: NSEvent) { if dragStart == nil && placeholder.isHidden { controls.isHidden = true } }
+    override func mouseExited(with event: NSEvent) {
+        cameraTooltip.hide()
+        if dragStart == nil && placeholder.isHidden { controls.isHidden = true }
+    }
     override func mouseDown(with event: NSEvent) {
+        cameraTooltip.hide()
         onDragStarted?()
         dragStart = NSEvent.mouseLocation
         windowStart = window?.frame.origin
@@ -313,12 +317,21 @@ final class CameraPreviewView: NSView {
         for (button, symbol, title, action) in [
             (smaller, "minus", "Smaller camera", #selector(shrink)),
             (larger, "plus", "Larger camera", #selector(grow)),
-            (shape, "square", "Use rounded square camera", #selector(switchShape)),
-            (backgroundButton, "person.crop.rectangle", "Remove camera background", #selector(switchBackground))
+            (shape, "square", "Rounded square", #selector(switchShape)),
+            (backgroundButton, "person.and.background.dotted", "Weather man view", #selector(switchBackground))
         ] {
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
             button.setAccessibilityLabel(title)
-            button.toolTip = title
+            button.hoverText = title
+            button.onHover = { [weak self, weak button] text in
+                guard let self else { return }
+                if let text, let button, let window = self.window {
+                    let anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
+                    self.cameraTooltip.show(text, anchor: anchor, camera: window)
+                } else {
+                    self.cameraTooltip.hide()
+                }
+            }
             button.isBordered = false
             button.contentTintColor = .white
             button.target = self
@@ -339,6 +352,7 @@ final class CameraPreviewView: NSView {
     }
 
     func detach() {
+        cameraTooltip.hide()
         previewLayer.session = nil
     }
 
@@ -365,5 +379,80 @@ final class CameraPreviewView: NSView {
 }
 
 private final class CameraControlButton: NSButton {
+    var hoverText = "" {
+        didSet { if isHovered { onHover?(hoverText) } }
+    }
+    var onHover: ((String?) -> Void)?
+    private var isHovered = false
+    private var hoverTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        onHover?(hoverText)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        onHover?(nil)
+    }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+@MainActor
+private final class CameraTooltip {
+    private var panel: NSPanel?
+
+    func show(_ text: String, anchor: CGRect, camera: NSWindow) {
+        hide()
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.textColor = .white
+        label.sizeToFit()
+        let size = CGSize(width: ceil(label.frame.width) + 20, height: 26)
+        let content = NSView(frame: CGRect(origin: .zero, size: size))
+        content.wantsLayer = true
+        content.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.9).cgColor
+        content.layer?.cornerRadius = 7
+        label.setFrameOrigin(CGPoint(x: 10, y: (size.height - label.frame.height) / 2))
+        content.addSubview(label)
+        let tooltip = NSPanel(contentRect: content.frame, styleMask: [.borderless, .nonactivatingPanel],
+                              backing: .buffered, defer: false)
+        tooltip.backgroundColor = .clear
+        tooltip.isOpaque = false
+        tooltip.hasShadow = false
+        tooltip.ignoresMouseEvents = true
+        tooltip.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        tooltip.level = NSWindow.Level(rawValue: camera.level.rawValue + 1)
+        tooltip.contentView = content
+        let screen = (camera.screen?.visibleFrame ?? camera.frame).insetBy(dx: 6, dy: 6)
+        let below = CGRect(x: anchor.midX - size.width / 2, y: camera.frame.minY - size.height - 6,
+                           width: size.width, height: size.height)
+        let candidates = [below,
+            CGRect(x: camera.frame.maxX + 6, y: anchor.midY - size.height / 2, width: size.width, height: size.height),
+            CGRect(x: camera.frame.minX - size.width - 6, y: anchor.midY - size.height / 2, width: size.width, height: size.height),
+            CGRect(x: below.minX, y: camera.frame.maxY + 6, width: size.width, height: size.height)]
+        for var frame in candidates {
+            frame.origin.x = min(max(frame.minX, screen.minX), screen.maxX - size.width)
+            guard screen.contains(frame), !frame.intersects(camera.frame) else { continue }
+            tooltip.setFrame(frame, display: false)
+            panel = tooltip
+            camera.addChildWindow(tooltip, ordered: .above)
+            tooltip.orderFrontRegardless()
+            return
+        }
+    }
+
+    func hide() {
+        if let panel { panel.parent?.removeChildWindow(panel); panel.orderOut(nil) }
+        panel = nil
+    }
 }

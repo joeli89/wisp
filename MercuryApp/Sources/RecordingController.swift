@@ -303,6 +303,13 @@ final class RecordingController: ObservableObject {
                 self?.compositor?.clearCameraFrame()
             }
             cameraManager.removeBackground = cameraPreview?.removesBackground ?? false
+            cameraManager.onCutoutUnavailable = { [weak self] message in
+                Task { @MainActor in
+                    guard let self, self.enableCamera, self.cameraPreview?.removesBackground == true else { return }
+                    self.cameraPreview?.showCutoutUnavailable(message)
+                    self.compositor?.clearCameraFrame()
+                }
+            }
             cameraManager.onCutoutFrame = { [weak self] image in
                 Task { @MainActor in
                     guard let self, self.enableCamera, self.cameraPreview?.removesBackground == true else { return }
@@ -390,7 +397,11 @@ final class RecordingController: ObservableObject {
         let hasAudio = useMic || useSystemAudio
 
         if useCamera { _ = await Permissions.ensureCamera() }
-        if useMic { _ = await Permissions.ensureMicrophone() }
+        if useMic, !(await Permissions.ensureMicrophone()) {
+            status = "Microphone access is off. Allow Mercury in System Settings → Privacy & Security → Microphone."
+            AppLog.log(status)
+            return
+        }
 
         var width: Int
         var height: Int

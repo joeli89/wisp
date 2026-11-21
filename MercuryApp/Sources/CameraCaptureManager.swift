@@ -14,12 +14,15 @@ final class CameraCaptureManager: NSObject, AVCaptureVideoDataOutputSampleBuffer
     var onFrame: ((CVPixelBuffer) -> Void)?
 
     var onCutoutFrame: ((CGImage) -> Void)?
+    var onCutoutUnavailable: ((String) -> Void)?
+    private var lastCutoutError: String?
     private let modeLock = NSLock()
     private var cutoutEnabled = false
     var removeBackground: Bool {
         get { modeLock.lock(); defer { modeLock.unlock() }; return cutoutEnabled }
         set { modeLock.lock(); cutoutEnabled = newValue; modeLock.unlock() }
     }
+    private var usesCPUFallback = false
     private let segmentation: VNGeneratePersonSegmentationRequest = {
         let request = VNGeneratePersonSegmentationRequest()
         request.qualityLevel = .balanced
@@ -86,8 +89,28 @@ final class CameraCaptureManager: NSObject, AVCaptureVideoDataOutputSampleBuffer
         guard removeBackground else { onFrame?(px); return }
         autoreleasepool {
             do {
-                try VNImageRequestHandler(cvPixelBuffer: px, orientation: .up).perform([segmentation])
-                guard removeBackground, let maskBuffer = segmentation.results?.first?.pixelBuffer else { return }
+                do {
+                    try VNImageRequestHandler(cvPixelBuffer: px, orientation: .up).perform([segmentation])
+                } catch {
+                    guard !usesCPUFallback else { throw error }
+                    for (stage, devices) in try segmentation.supportedComputeStageDevices {
+                        if let cpu = devices.first(where: { if case .cpu = $0 { return true }; return false }) {
+                            segmentation.setComputeDevice(cpu, for: stage)
+                        }
+                    }
+                    usesCPUFallback = true
+                    AppLog.log("Camera cutout: retrying on CPU after \(error.localizedDescription)")
+                    try VNImageRequestHandler(cvPixelBuffer: px, orientation: .up).perform([segmentation])
+                }
+                guard removeBackground else { return }
+                guard let maskBuffer = segmentation.results?.first?.pixelBuffer else {
+                    reportCutoutUnavailable("No person detected")
+                    return
+                }
+                guard Self.hasVisiblePerson(maskBuffer) else {
+                    reportCutoutUnavailable("No person detected")
+                    return
+                }
                 let source = CIImage(cvPixelBuffer: px)
                 let mask = CIImage(cvPixelBuffer: maskBuffer)
                 let fittedMask = mask.transformed(by: CGAffineTransform(scaleX: source.extent.width / mask.extent.width,
@@ -98,11 +121,38 @@ final class CameraCaptureManager: NSObject, AVCaptureVideoDataOutputSampleBuffer
                 let scale = min(1, 960 / source.extent.width)
                 let scaled = cutout.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
                 if let image = imageContext.createCGImage(scaled, from: scaled.extent), removeBackground {
+                    lastCutoutError = nil
                     onCutoutFrame?(image)
                 }
             } catch {
-                // Keep the last cutout; never reveal the background after opting to remove it.
+                reportCutoutUnavailable("Cutout unavailable — turn off to restore camera")
+                if lastCutoutError != error.localizedDescription {
+                    AppLog.log("Camera cutout: \(error.localizedDescription)")
+                    lastCutoutError = error.localizedDescription
+                }
             }
         }
     }
+
+    private func reportCutoutUnavailable(_ message: String) {
+        guard removeBackground else { return }
+        onCutoutUnavailable?(message)
+    }
+
+    private static func hasVisiblePerson(_ mask: CVPixelBuffer) -> Bool {
+        CVPixelBufferLockBaseAddress(mask, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(mask, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(mask) else { return false }
+        let width = CVPixelBufferGetWidth(mask), height = CVPixelBufferGetHeight(mask)
+        let rowBytes = CVPixelBufferGetBytesPerRow(mask)
+        let pixels = base.assumingMemoryBound(to: UInt8.self)
+        let inset = max(0, (width - height) / 2)
+        for y in stride(from: 0, to: height, by: 4) {
+            for x in stride(from: inset, to: width - inset, by: 4) {
+                if pixels[y * rowBytes + x] > 127 { return true }
+            }
+        }
+        return false
+    }
+
 }

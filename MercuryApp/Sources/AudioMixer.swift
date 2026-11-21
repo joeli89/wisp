@@ -12,6 +12,8 @@ import AVFoundation
 final class AudioMixer {
     private let lock = NSLock()
     enum Source { case system, mic }
+    private var peaks: [Source: Float] = [:]
+    private var bufferCounts: [Source: Int] = [:]
 
     private let sampleRate: Double = 48000
     private let channels = 2
@@ -39,10 +41,12 @@ final class AudioMixer {
                                        formatDescriptionOut: &canonicalFormatDesc)
     }
 
-    func append(_ sampleBuffer: CMSampleBuffer, from _: Source) {
+    func append(_ sampleBuffer: CMSampleBuffer, from source: Source) {
         lock.lock(); defer { lock.unlock() }
         guard !finished else { return }
         guard let (startIndex, samples) = canonicalSamples(from: sampleBuffer) else { return }
+        peaks[source] = max(peaks[source] ?? 0, samples.reduce(Float(0)) { max($0, abs($1)) })
+        bufferCounts[source, default: 0] += 1
         let frames = samples.count / channels
         guard frames > 0 else { return }
 
@@ -76,6 +80,7 @@ final class AudioMixer {
         guard !finished else { return }
         finished = true
         flush(force: true)
+        AppLog.log("Audio mixed: mic buffers=\(bufferCounts[.mic] ?? 0) peak=\(peaks[.mic] ?? 0); system buffers=\(bufferCounts[.system] ?? 0) peak=\(peaks[.system] ?? 0)")
     }
     private var finished = false
 

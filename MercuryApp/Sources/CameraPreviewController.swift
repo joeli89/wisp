@@ -24,6 +24,11 @@ final class CameraPreviewController: NSObject, NSWindowDelegate {
         previewView?.showCutout(image)
     }
 
+    func showCutoutUnavailable(_ message: String) {
+        guard removesBackground else { return }
+        previewView?.showCutoutUnavailable(message)
+    }
+
     private func toggleBackground() {
         removesBackground.toggle()
         previewView?.removesBackground = removesBackground
@@ -162,11 +167,12 @@ final class CameraPreviewView: NSView {
     private let previewLayer = AVCaptureVideoPreviewLayer()
     private let ring = CAShapeLayer()
     private let cutoutLayer = CALayer()
-    private let backgroundButton = NSButton(title: "", target: nil, action: nil)
+    private let backgroundButton = CameraControlButton(title: "", target: nil, action: nil)
     private let controls = NSView()
-    private let smaller = NSButton(title: "", target: nil, action: nil)
-    private let larger = NSButton(title: "", target: nil, action: nil)
-    private let shape = NSButton(title: "", target: nil, action: nil)
+    private let smaller = CameraControlButton(title: "", target: nil, action: nil)
+    private let larger = CameraControlButton(title: "", target: nil, action: nil)
+    private let shape = CameraControlButton(title: "", target: nil, action: nil)
+    private let placeholder = NSTextField(wrappingLabelWithString: "Preparing cutout…")
     private var tracking: NSTrackingArea?
     private var dragStart: CGPoint?
     private var windowStart: CGPoint?
@@ -176,16 +182,22 @@ final class CameraPreviewView: NSView {
     var onRemoveBackground: (() -> Void)?
     var removesBackground = false {
         didSet {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             previewLayer.isHidden = removesBackground
             cutoutLayer.isHidden = !removesBackground
             cutoutLayer.contents = nil
             ring.isHidden = removesBackground
+            placeholder.stringValue = "Preparing cutout…"
+            placeholder.isHidden = !removesBackground
+            controls.isHidden = false
             shape.isEnabled = !removesBackground
             backgroundButton.contentTintColor = removesBackground ? .systemGreen : .white
             backgroundButton.state = removesBackground ? .on : .off
             let label = removesBackground ? "Restore camera background" : "Remove camera background"
             backgroundButton.toolTip = label
             backgroundButton.setAccessibilityLabel(label)
+            CATransaction.commit()
         }
     }
 
@@ -193,9 +205,20 @@ final class CameraPreviewView: NSView {
         guard removesBackground else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        placeholder.isHidden = true
         cutoutLayer.contents = image
         CATransaction.commit()
     }
+    func showCutoutUnavailable(_ message: String) {
+        guard removesBackground else { return }
+        cutoutLayer.contents = nil
+        placeholder.stringValue = message
+        placeholder.isHidden = false
+        controls.isHidden = false
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     var onDragStarted: (() -> Void)?
     var onDragEnded: (() -> Void)?
     var cornerFraction: CGFloat = 0.5 {
@@ -220,7 +243,7 @@ final class CameraPreviewView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) { controls.isHidden = false }
-    override func mouseExited(with event: NSEvent) { if dragStart == nil { controls.isHidden = true } }
+    override func mouseExited(with event: NSEvent) { if dragStart == nil && placeholder.isHidden { controls.isHidden = true } }
     override func mouseDown(with event: NSEvent) {
         onDragStarted?()
         dragStart = NSEvent.mouseLocation
@@ -274,6 +297,14 @@ final class CameraPreviewView: NSView {
         ring.lineWidth = 3
         layer?.addSublayer(ring)
 
+        placeholder.alignment = .center
+        placeholder.textColor = .white
+        placeholder.font = .systemFont(ofSize: 12, weight: .medium)
+        placeholder.drawsBackground = true
+        placeholder.backgroundColor = .black.withAlphaComponent(0.75)
+        placeholder.isHidden = true
+        addSubview(placeholder)
+
         controls.wantsLayer = true
         controls.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.78).cgColor
         controls.layer?.cornerRadius = 16
@@ -325,9 +356,14 @@ final class CameraPreviewView: NSView {
         let rect = bounds.insetBy(dx: inset, dy: inset)
         ring.path = CGPath(roundedRect: rect, cornerWidth: max(0, radius - inset), cornerHeight: max(0, radius - inset), transform: nil)
         ring.frame = bounds
+        placeholder.frame = CGRect(x: 8, y: bounds.midY - 20, width: bounds.width - 16, height: 48)
         controls.frame = CGRect(x: (bounds.width - 112) / 2, y: 10, width: 112, height: 32)
         for (index, button) in [smaller, larger, shape, backgroundButton].enumerated() {
             button.frame = CGRect(x: 4 + index * 26, y: 2, width: 26, height: 28)
         }
     }
+}
+
+private final class CameraControlButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

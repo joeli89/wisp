@@ -5,6 +5,7 @@ import AVFoundation
 /// microphone, forwarding each to the supplied callbacks.
 final class ScreenCaptureManager: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
+    private var audioCounts: [SCStreamOutputType: Int] = [:]
     private let videoQueue = DispatchQueue(label: "com.mercury.capture.video")
     private let audioQueue = DispatchQueue(label: "com.mercury.capture.audio")
 
@@ -72,6 +73,7 @@ final class ScreenCaptureManager: NSObject, SCStreamOutput, SCStreamDelegate {
             config.sampleRate = 48000
             config.channelCount = 2
         }
+
         if captureMic {
             config.captureMicrophone = true
             config.microphoneCaptureDeviceID = micDeviceID
@@ -87,6 +89,7 @@ final class ScreenCaptureManager: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         self.stream = stream
         try await stream.startCapture()
+
     }
 
     func stop() async {
@@ -99,6 +102,14 @@ final class ScreenCaptureManager: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
                 of type: SCStreamOutputType) {
+        if type == .audio || type == .microphone {
+            let count = (audioCounts[type] ?? 0) + 1
+            audioCounts[type] = count
+            if count == 1, let description = CMSampleBufferGetFormatDescription(sampleBuffer) {
+                let format = AVAudioFormat(cmAudioFormatDescription: description)
+                AppLog.log("Audio input: \(type == .microphone ? "microphone" : "system") \(format), samples=\(CMSampleBufferGetNumSamples(sampleBuffer))")
+            }
+        }
         switch type {
         case .screen:
             guard CMSampleBufferGetImageBuffer(sampleBuffer) != nil, isComplete(sampleBuffer) else { return }

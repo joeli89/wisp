@@ -16,6 +16,7 @@ private struct ButtonFrameKey: PreferenceKey {
 /// Recording controls that expand from the top edge of the display.
 /// The settings popover embeds the full configuration UI (ContentView).
 struct ToolbarView: View {
+    @ObservedObject var pointerState: NotchPointerState
     @EnvironmentObject var controller: RecordingController
     @EnvironmentObject var tooltipController: TooltipController
     @EnvironmentObject var statusController: StatusController
@@ -24,6 +25,7 @@ struct ToolbarView: View {
     var compactWidth: CGFloat = 190
     var notchHeight: CGFloat = 0
     var onShelfSizeChange: (CGSize) -> Void = { _ in }
+    var onInteractionModeChange: (Bool) -> Void = { _ in }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
@@ -43,6 +45,24 @@ struct ToolbarView: View {
         .onChange(of: showSettings) { _, _ in tooltipController.hide(); scheduleCollapse() }
         .onChange(of: showBackgrounds) { _, _ in tooltipController.hide(); scheduleCollapse() }
         .onChange(of: showSources) { _, _ in tooltipController.hide(); scheduleCollapse() }
+        .onChange(of: shelfExpanded || controller.isRecording) { _, active in
+            onInteractionModeChange(active)
+        }
+        .onChange(of: pointerState.isInside) { _, inside in
+            insideShelf = inside
+            guard !controller.isRecording else { return }
+            collapseTask?.cancel()
+            expandTask?.cancel()
+            if inside {
+                expandTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard !Task.isCancelled, pointerState.isInside else { return }
+                    expanded = true
+                }
+            } else {
+                scheduleCollapse()
+            }
+        }
         .onDisappear { collapseTask?.cancel(); expandTask?.cancel() }
         // Collect button frames reported from within the pill
         .onPreferenceChange(ButtonFrameKey.self) { buttonFrames = $0 }
@@ -181,22 +201,7 @@ struct ToolbarView: View {
         .background(.black)
         .clipShape(NotchOutline(bottomRadius: shelfExpanded ? 20 : 12))
         .environment(\.colorScheme, .dark)
-        .contentShape(Rectangle())
-        .onHover { inside in
-            insideShelf = inside
-            guard !controller.isRecording else { return }
-            collapseTask?.cancel()
-            expandTask?.cancel()
-            if inside {
-                expandTask = Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(100))
-                    guard !Task.isCancelled else { return }
-                    expanded = true
-                }
-            } else {
-                scheduleCollapse()
-            }
-        }
+        .contentShape(.interaction, NotchOutline(bottomRadius: shelfExpanded ? 20 : 12))
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
             onShelfSizeChange(size)
         }
@@ -519,7 +524,7 @@ private struct WispDotMark: View {
     }
 }
 
-private struct NotchOutline: Shape {
+struct NotchOutline: Shape {
     var bottomRadius: CGFloat
 
     var animatableData: CGFloat {

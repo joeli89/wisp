@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: FloatingPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+    let pointerState = NotchPointerState()
         controller.cameraPreview = cameraPreview
         controller.phonePreview = phonePreview
 
@@ -32,12 +33,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   let right = screen.auxiliaryTopRightArea else { return nil }
             return right.minX - left.maxX
         } ?? 190
-        let toolbarView = ToolbarView(compactWidth: notchWidth + 4, notchHeight: screen?.safeAreaInsets.top ?? 0,
+        let toolbarView = ToolbarView(pointerState: pointerState,
+                                      compactWidth: notchWidth + 4, notchHeight: screen?.safeAreaInsets.top ?? 0,
                                       onShelfSizeChange: { [weak self] size in
                                           DispatchQueue.main.async { self?.panel?.interactionSize = size }
                                       })
             .environmentObject(controller)
             .environmentObject(tooltipController)
+                                      }, onInteractionModeChange: { [weak self] active in
+                                          self?.panel?.usesCompactInteractionRegion = !active
             .environmentObject(statusController)
             .environmentObject(sourceFlyout)
 
@@ -50,7 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.panel = panel
 
         let size = CGSize(width: 524, height: (screen?.safeAreaInsets.top ?? 0) + 540)
-        panel.interactionSize = CGSize(width: notchWidth + 28, height: (screen?.safeAreaInsets.top ?? 0) + 20)
+        panel.pointerState = pointerState
+        panel.compactInteractionSize = CGSize(width: notchWidth + 28, height: (screen?.safeAreaInsets.top ?? 0) + 20)
+        panel.interactionSize = panel.compactInteractionSize
         positionPanel(panel, size: size)
         panel.orderFrontRegardless()
         panel.trackInteractiveRegion()
